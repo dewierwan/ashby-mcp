@@ -750,9 +750,19 @@ Response: filename, content (extracted text), or url (for unsupported formats).`
             }
           }
 
-          // Clean up and join
-          const text = textChunks
-            .join(" ")
+          // Join chunks: don't insert spaces between single-char chunks (glyph-per-Tj PDFs)
+          let joined = "";
+          for (let i = 0; i < textChunks.length; i++) {
+            const chunk = textChunks[i];
+            const prev = i > 0 ? textChunks[i - 1] : "";
+            // Add space only if previous or current chunk is multi-char (real word boundaries)
+            if (i > 0 && (prev.length > 1 || chunk.length > 1)) {
+              joined += " ";
+            }
+            joined += chunk;
+          }
+          // Clean up PDF escape sequences
+          const text = joined
             .replace(/\\n/g, "\n")
             .replace(/\\r/g, "")
             .replace(/\\t/g, " ")
