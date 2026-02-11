@@ -106,12 +106,12 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
 
   server.tool(
     "ashby_get_job_details",
-    `Get full details for a specific job including its interview plan stages.
+    `Get full details for a specific job including its description and interview plan stages.
 
 Use this after ashby_list_jobs to understand a position's requirements and hiring pipeline.
-Fetches the job, then resolves its interview plan stages automatically.
+Fetches the job, resolves the job posting description, and interview plan stages automatically.
 
-Response: job (id, title, status, hiringTeam, customFields, locationId, departmentId), interview_stages[] (id, title, type, order).`,
+Response: job (id, title, status, description, hiringTeam, customFields, locationId, departmentId), interview_stages[] (id, title, type, order).`,
     {
       job_id: z.string().describe("The job ID (UUID) to fetch details for."),
     },
@@ -119,19 +119,32 @@ Response: job (id, title, status, hiringTeam, customFields, locationId, departme
       try {
         const job = await client.request<Job>("job.info", { id: job_id });
 
-        // Fetch stages for the job's interview plan(s)
+        // Fetch stages and job posting description concurrently
         const planIds = job.interviewPlanIds ?? (job.defaultInterviewPlanId ? [job.defaultInterviewPlanId] : []);
-        const stageResults = await Promise.all(
-          planIds.map((planId) =>
-            client
-              .requestList<InterviewStage>("interviewStage.list", { interviewPlanId: planId })
-              .then((r) => r.results)
-              .catch((e) => {
-                logger.warn("failed to fetch interview stages", { planId, error: e instanceof Error ? e.message : String(e) });
-                return [] as InterviewStage[];
-              })
-          )
-        );
+        const postingId = (job.jobPostingIds ?? [])[0] ?? null;
+
+        const [stageResults, description] = await Promise.all([
+          Promise.all(
+            planIds.map((planId) =>
+              client
+                .requestList<InterviewStage>("interviewStage.list", { interviewPlanId: planId })
+                .then((r) => r.results)
+                .catch((e) => {
+                  logger.warn("failed to fetch interview stages", { planId, error: e instanceof Error ? e.message : String(e) });
+                  return [] as InterviewStage[];
+                })
+            )
+          ),
+          postingId
+            ? client
+                .request<{ descriptionPlain?: string }>("jobPosting.info", { jobPostingId: postingId })
+                .then((p) => p.descriptionPlain ?? null)
+                .catch((e) => {
+                  logger.warn("failed to fetch job posting", { postingId, error: e instanceof Error ? e.message : String(e) });
+                  return null as string | null;
+                })
+            : Promise.resolve(null as string | null),
+        ]);
         const stages = stageResults.flat();
 
         return json({
@@ -139,6 +152,7 @@ Response: job (id, title, status, hiringTeam, customFields, locationId, departme
             id: job.id,
             title: job.title,
             status: job.status,
+            description,
             employmentType: job.employmentType ?? null,
             locationId: job.locationId ?? null,
             departmentId: job.departmentId ?? null,

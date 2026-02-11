@@ -170,6 +170,69 @@ describe("createServer", () => {
     });
   });
 
+  describe("ashby_get_job_details", () => {
+    it("includes job posting description when available", async () => {
+      // job.info returns the job with a jobPostingId
+      mockRequest.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "job.info") {
+          return Promise.resolve({
+            id: "j1",
+            title: "Engineer",
+            status: "Open",
+            jobPostingIds: ["jp1"],
+            interviewPlanIds: ["plan1"],
+            hiringTeam: [],
+            customFields: [],
+            createdAt: "2024-01-01",
+            updatedAt: "2024-01-02",
+          });
+        }
+        if (endpoint === "jobPosting.info" && params.jobPostingId === "jp1") {
+          return Promise.resolve({ descriptionPlain: "We are hiring an engineer." });
+        }
+        return Promise.resolve({});
+      });
+      mockRequestList.mockResolvedValueOnce({
+        results: [{ id: "s1", title: "Phone Screen", type: "Interview", orderInInterviewPlan: 1 }],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_job_details",
+        arguments: { job_id: "j1" },
+      });
+      const data = getJson(result) as { job: { description: string | null; title: string }; interview_stages: unknown[] };
+
+      expect(data.job.description).toBe("We are hiring an engineer.");
+      expect(data.job.title).toBe("Engineer");
+      expect(data.interview_stages).toHaveLength(1);
+    });
+
+    it("returns null description when job has no postings", async () => {
+      mockRequest.mockResolvedValueOnce({
+        id: "j2",
+        title: "Designer",
+        status: "Open",
+        jobPostingIds: [],
+        interviewPlanIds: [],
+        hiringTeam: [],
+        customFields: [],
+        createdAt: "2024-01-01",
+        updatedAt: "2024-01-02",
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_job_details",
+        arguments: { job_id: "j2" },
+      });
+      const data = getJson(result) as { job: { description: string | null } };
+
+      expect(data.job.description).toBeNull();
+    });
+  });
+
   describe("ashby_get_candidate", () => {
     it("resolves applicationIds concurrently", async () => {
       mockRequest.mockImplementation(

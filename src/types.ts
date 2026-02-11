@@ -103,6 +103,7 @@ export interface Job {
   departmentId?: string;
   defaultInterviewPlanId?: string;
   interviewPlanIds?: string[];
+  jobPostingIds?: string[];
   customFields?: CustomField[];
   hiringTeam?: HiringTeamMember[];
   createdAt: string;
