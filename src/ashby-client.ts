@@ -5,6 +5,9 @@ import type {
 } from "./types.js";
 
 const BASE_URL = "https://api.ashbyhq.com";
+const API_TIMEOUT_MS = 30_000;
+const MAX_RETRIES = 3;
+const BASE_DELAY_MS = 1_000;
 
 export class AshbyClient {
   private authHeader: string;
@@ -20,6 +23,57 @@ export class AshbyClient {
     this.authHeader = `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
   }
 
+  /** Shared fetch with timeout, retry on 429/5xx, and error handling. */
+  private async post(
+    endpoint: string,
+    params?: Record<string, unknown>
+  ): Promise<Response> {
+    const url = `${BASE_URL}/${endpoint}`;
+    const body = JSON.stringify(params ?? {});
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+          Authorization: this.authHeader,
+        },
+        body,
+        signal: AbortSignal.timeout(API_TIMEOUT_MS),
+      });
+
+      if (response.ok) return response;
+
+      const retryable = response.status === 429 || response.status >= 500;
+      if (!retryable || attempt === MAX_RETRIES - 1) {
+        throw new AshbyApiError(
+          `HTTP ${response.status}: ${response.statusText}`,
+          response.status
+        );
+      }
+
+      // Respect Retry-After header, otherwise use exponential backoff
+      const retryAfter = response.headers.get("retry-after");
+      const delayMs = retryAfter
+        ? parseInt(retryAfter, 10) * 1000 || BASE_DELAY_MS
+        : BASE_DELAY_MS * 2 ** attempt;
+      await new Promise((r) => setTimeout(r, delayMs));
+    }
+
+    // Unreachable, but satisfies TypeScript
+    throw new AshbyApiError("Max retries exceeded");
+  }
+
+  /** Parse an error response into an AshbyApiError. */
+  private parseError(data: AshbyErrorResponse): AshbyApiError {
+    const message =
+      data.errorInfo?.message ??
+      data.errors?.join(", ") ??
+      "Unknown Ashby API error";
+    return new AshbyApiError(message, 200, data.errorInfo?.code);
+  }
+
   /**
    * Make a single request to an Ashby API endpoint.
    * All Ashby endpoints are POST with JSON bodies.
@@ -28,34 +82,11 @@ export class AshbyClient {
     endpoint: string,
     params?: Record<string, unknown>
   ): Promise<T> {
-    const url = `${BASE_URL}/${endpoint}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: this.authHeader,
-      },
-      body: JSON.stringify(params ?? {}),
-    });
-
-    if (!response.ok) {
-      throw new AshbyApiError(
-        `HTTP ${response.status}: ${response.statusText}`,
-        response.status
-      );
-    }
-
+    const response = await this.post(endpoint, params);
     const data = (await response.json()) as AshbyResponse<T>;
 
     if (!data.success) {
-      const err = data as AshbyErrorResponse;
-      const message =
-        err.errorInfo?.message ??
-        err.errors?.join(", ") ??
-        "Unknown Ashby API error";
-      throw new AshbyApiError(message, 200, err.errorInfo?.code);
+      throw this.parseError(data as AshbyErrorResponse);
     }
 
     return (data as { success: true; results: T }).results;
@@ -73,34 +104,11 @@ export class AshbyClient {
     moreDataAvailable: boolean;
     nextCursor?: string;
   }> {
-    const url = `${BASE_URL}/${endpoint}`;
-
-    const response = await fetch(url, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Accept: "application/json",
-        Authorization: this.authHeader,
-      },
-      body: JSON.stringify(params ?? {}),
-    });
-
-    if (!response.ok) {
-      throw new AshbyApiError(
-        `HTTP ${response.status}: ${response.statusText}`,
-        response.status
-      );
-    }
-
+    const response = await this.post(endpoint, params);
     const data = (await response.json()) as AshbyListResponse<T>;
 
     if (!data.success) {
-      const err = data as AshbyErrorResponse;
-      const message =
-        err.errorInfo?.message ??
-        err.errors?.join(", ") ??
-        "Unknown Ashby API error";
-      throw new AshbyApiError(message, 200, err.errorInfo?.code);
+      throw this.parseError(data as AshbyErrorResponse);
     }
 
     const ok = data as {
@@ -115,33 +123,6 @@ export class AshbyClient {
       moreDataAvailable: ok.moreDataAvailable,
       nextCursor: ok.nextCursor,
     };
-  }
-
-  /**
-   * Async generator that yields items across all pages.
-   * Useful when you need to collect all results.
-   */
-  async *paginate<T>(
-    endpoint: string,
-    params?: Record<string, unknown>
-  ): AsyncGenerator<T> {
-    let cursor: string | undefined;
-    let hasMore = true;
-
-    while (hasMore) {
-      const reqParams: Record<string, unknown> = { ...params };
-      if (cursor) {
-        reqParams.cursor = cursor;
-      }
-
-      const page = await this.requestList<T>(endpoint, reqParams);
-      for (const item of page.results) {
-        yield item;
-      }
-
-      hasMore = page.moreDataAvailable;
-      cursor = page.nextCursor;
-    }
   }
 }
 

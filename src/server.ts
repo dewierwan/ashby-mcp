@@ -50,7 +50,6 @@ export function createServer(): McpServer {
 
 Use this to discover what positions exist before looking at candidates.
 Returns a paginated list — pass the next_cursor value to fetch more results.
-The status filter is applied client-side since the Ashby API returns all jobs.
 
 Response: items[] (id, title, status, locationId, departmentId), has_more, next_cursor.`,
     {
@@ -73,16 +72,12 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
       try {
         const params: Record<string, unknown> = { limit };
         if (cursor) params.cursor = cursor;
+        if (status !== "All") params.status = status;
 
         const page = await client.requestList<Job>("job.list", params);
 
-        const filtered =
-          status === "All"
-            ? page.results
-            : page.results.filter((j) => j.status === status);
-
         return json({
-          items: filtered.map((j) => ({
+          items: page.results.map((j) => ({
             id: j.id,
             title: j.title,
             status: j.status,
@@ -619,8 +614,10 @@ Response: filename, content (extracted text), or url (for unsupported formats).`
           return json({ error: "No download URL returned by Ashby." });
         }
 
-        // Download the file
-        const response = await fetch(url);
+        // Download the file (60s timeout for large files)
+        const response = await fetch(url, {
+          signal: AbortSignal.timeout(60_000),
+        });
         if (!response.ok) {
           return json({
             error: `Failed to download file: HTTP ${response.status}`,
