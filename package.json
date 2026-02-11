@@ -1,0 +1,35 @@
+{
+  "name": "ashby-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for Ashby ATS — candidate evaluation workflow",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "ashby-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dewierwan/ashby-mcp"
+  },
+  "scripts": {
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
+    "start": "node dist/index.js",
+    "test-api": "tsx scripts/test-api.ts"
+  },
+  "keywords": ["mcp", "ashby", "ats", "recruiting", "hiring", "applicant-tracking"],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1",
+    "zod": "^3.24.2"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.4",
+    "tsx": "^4.19.3",
+    "typescript": "^5.7.3"
+  }
+}
