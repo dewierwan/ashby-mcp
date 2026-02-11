@@ -82,6 +82,7 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `ashby_search_candidates` | Search candidates by name or email |
 | `ashby_list_interview_stages` | List all interview stages (pipeline reference) |
 | `ashby_get_feedback` | Submitted feedback/scorecards for an application |
+| `ashby_get_resume` | Download and extract text from a candidate's resume (PDF, text) |
 
 ### Write tools
 
@@ -105,6 +106,8 @@ Review the feedback submitted for application abc-123 and summarize the intervie
 Add a note to candidate xyz-456: "Strong technical skills demonstrated in system design round. Recommend advancing to final interview."
 
 Move application abc-123 to the "Final Interview" stage.
+
+Read the resume for candidate Jane Smith and summarize her experience.
 ```
 
 ## Testing
@@ -134,5 +137,6 @@ The server communicates over stdio — it will start silently and wait for MCP p
 ```bash
 npm install
 npm run build    # compile TypeScript to dist/
+npm test         # run tests
 npm start        # run the built server
 ```

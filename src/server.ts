@@ -1,7 +1,8 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
-import { inflateSync } from "node:zlib";
 import { AshbyClient, AshbyApiError } from "./ashby-client.js";
+import { extractPdfText } from "./pdf.js";
+import { logger } from "./logger.js";
 import type {
   Job,
   Application,
@@ -119,7 +120,10 @@ Response: job (id, title, status, hiringTeam, customFields, locationId, departme
             client
               .requestList<InterviewStage>("interviewStage.list", { interviewPlanId: planId })
               .then((r) => r.results)
-              .catch(() => [] as InterviewStage[])
+              .catch((e) => {
+                logger.warn("failed to fetch interview stages", { planId, error: e instanceof Error ? e.message : String(e) });
+                return [] as InterviewStage[];
+              })
           )
         );
         const stages = stageResults.flat();
@@ -238,7 +242,10 @@ Response: candidate (id, name, email, phone, socialLinks, tags, source, profileU
             appIds.map((appId) =>
               client
                 .request<Application>("application.info", { applicationId: appId })
-                .catch(() => null)
+                .catch((e) => {
+                  logger.warn("failed to resolve application", { appId, error: e instanceof Error ? e.message : String(e) });
+                  return null;
+                })
             )
           );
           applications = appResults.filter((a): a is Application => a !== null);
@@ -301,13 +308,22 @@ Response: application (id, status, candidate, job, current_stage, hiringTeam, so
           client.request<Application>("application.info", { applicationId: application_id }),
           client
             .requestList<ApplicationHistoryEntry>("application.listHistory", { applicationId: application_id })
-            .catch(() => ({ results: [] as ApplicationHistoryEntry[], moreDataAvailable: false })),
+            .catch((e) => {
+              logger.warn("failed to fetch application history", { applicationId: application_id, error: e instanceof Error ? e.message : String(e) });
+              return { results: [] as ApplicationHistoryEntry[], moreDataAvailable: false };
+            }),
           client
             .requestList<CriteriaEvaluation>("application.listCriteriaEvaluations", { applicationId: application_id })
-            .catch(() => ({ results: [] as CriteriaEvaluation[], moreDataAvailable: false })),
+            .catch((e) => {
+              logger.warn("failed to fetch criteria evaluations", { applicationId: application_id, error: e instanceof Error ? e.message : String(e) });
+              return { results: [] as CriteriaEvaluation[], moreDataAvailable: false };
+            }),
           client
             .requestList<ApplicationFeedback>("applicationFeedback.list", { applicationId: application_id })
-            .catch(() => ({ results: [] as ApplicationFeedback[], moreDataAvailable: false })),
+            .catch((e) => {
+              logger.warn("failed to fetch feedback", { applicationId: application_id, error: e instanceof Error ? e.message : String(e) });
+              return { results: [] as ApplicationFeedback[], moreDataAvailable: false };
+            }),
         ]);
 
         return json({
@@ -462,7 +478,10 @@ Response: plans[] (plan_id, plan_title, stages[] (id, title, type, order)).`,
           planPage.results.map(async (plan) => {
             const stagePage = await client
               .requestList<InterviewStage>("interviewStage.list", { interviewPlanId: plan.id })
-              .catch(() => ({ results: [] as InterviewStage[], moreDataAvailable: false }));
+              .catch((e) => {
+                logger.warn("failed to fetch stages for plan", { planId: plan.id, error: e instanceof Error ? e.message : String(e) });
+                return { results: [] as InterviewStage[], moreDataAvailable: false };
+              });
 
             return {
               plan_id: plan.id,
@@ -638,143 +657,12 @@ Response: filename, content (extracted text), or url (for unsupported formats).`
         // For PDFs, extract text from the binary
         if (contentType.includes("pdf") || ext === "pdf") {
           const buffer = Buffer.from(await response.arrayBuffer());
-          const raw = buffer.toString("latin1");
-
-          // Decode all streams (decompress FlateDecode where needed)
-          const decodedStreams: string[] = [];
-          const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
-          let sMatch;
-          while ((sMatch = streamRegex.exec(raw)) !== null) {
-            const before = raw.substring(Math.max(0, sMatch.index - 300), sMatch.index);
-            const isFlate = /\/Filter\s*\/FlateDecode/.test(before);
-            if (isFlate) {
-              try {
-                decodedStreams.push(inflateSync(Buffer.from(sMatch[1], "latin1")).toString("latin1"));
-              } catch {
-                // skip undecompressable streams
-              }
-            } else {
-              decodedStreams.push(sMatch[1]);
-            }
-          }
-
-          // Build CMap: parse beginbfchar/beginbfrange sections to map glyph codes to Unicode
-          const cmap = new Map<string, string>();
-          for (const s of decodedStreams) {
-            // bfchar: <src> <dst>
-            const charBlock = /beginbfchar([\s\S]*?)endbfchar/g;
-            let cb;
-            while ((cb = charBlock.exec(s)) !== null) {
-              const pairs = /\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
-              let p;
-              while ((p = pairs.exec(cb[1])) !== null) {
-                const hex = p[2];
-                let ch = "";
-                for (let i = 0; i < hex.length; i += 4) {
-                  ch += String.fromCodePoint(parseInt(hex.substring(i, i + 4), 16));
-                }
-                cmap.set(p[1].toLowerCase(), ch);
-              }
-            }
-            // bfrange: <srcLo> <srcHi> <dstStart>
-            const rangeBlock = /beginbfrange([\s\S]*?)endbfrange/g;
-            let rb;
-            while ((rb = rangeBlock.exec(s)) !== null) {
-              const ranges = /\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
-              let r;
-              while ((r = ranges.exec(rb[1])) !== null) {
-                const lo = parseInt(r[1], 16);
-                const hi = parseInt(r[2], 16);
-                let dst = parseInt(r[3], 16);
-                const padLen = r[1].length;
-                for (let code = lo; code <= hi; code++) {
-                  cmap.set(code.toString(16).padStart(padLen, "0").toLowerCase(), String.fromCodePoint(dst++));
-                }
-              }
-            }
-          }
-
-          // Decode a hex string using CMap, falling back to raw char codes
-          function decodeHex(hex: string): string {
-            // Determine glyph width (1 or 2 bytes) from CMap keys
-            const keyLen = cmap.size > 0 ? [...cmap.keys()][0].length : 2;
-            let result = "";
-            for (let i = 0; i < hex.length; i += keyLen) {
-              const code = hex.substring(i, i + keyLen).toLowerCase();
-              if (cmap.has(code)) {
-                result += cmap.get(code);
-              } else {
-                const cp = parseInt(code, 16);
-                if (cp >= 0x20 && cp < 0x7f) result += String.fromCharCode(cp);
-              }
-            }
-            return result;
-          }
-
-          // Extract text from content streams
-          const textChunks: string[] = [];
-          for (const s of decodedStreams) {
-            // Skip CMap and font streams
-            if (/beginbfchar|beginbfrange|\/CIDInit/.test(s)) continue;
-
-            // Hex string Tj: <hex> Tj
-            const hexTj = /<([0-9A-Fa-f]+)>\s*Tj/g;
-            let hm;
-            while ((hm = hexTj.exec(s)) !== null) {
-              textChunks.push(decodeHex(hm[1]));
-            }
-            // Parenthesized string Tj: (text) Tj
-            const parenTj = /\(([^)]*)\)\s*Tj/g;
-            let pm;
-            while ((pm = parenTj.exec(s)) !== null) {
-              textChunks.push(pm[1]);
-            }
-            // TJ arrays with hex: [<hex> num <hex> ...] TJ
-            const tjArr = /\[((?:<[0-9A-Fa-f]+>|\([^)]*\)|[^\]])*)\]\s*TJ/g;
-            let am;
-            while ((am = tjArr.exec(s)) !== null) {
-              const inner = am[1];
-              const hexInner = /<([0-9A-Fa-f]+)>/g;
-              let hi;
-              while ((hi = hexInner.exec(inner)) !== null) {
-                textChunks.push(decodeHex(hi[1]));
-              }
-              const parenInner = /\(([^)]*)\)/g;
-              let pi;
-              while ((pi = parenInner.exec(inner)) !== null) {
-                textChunks.push(pi[1]);
-              }
-            }
-          }
-
-          // Join chunks: don't insert spaces between single-char chunks (glyph-per-Tj PDFs)
-          let joined = "";
-          for (let i = 0; i < textChunks.length; i++) {
-            const chunk = textChunks[i];
-            const prev = i > 0 ? textChunks[i - 1] : "";
-            // Add space only if previous or current chunk is multi-char (real word boundaries)
-            if (i > 0 && (prev.length > 1 || chunk.length > 1)) {
-              joined += " ";
-            }
-            joined += chunk;
-          }
-          // Clean up PDF escape sequences
-          const text = joined
-            .replace(/\\n/g, "\n")
-            .replace(/\\r/g, "")
-            .replace(/\\t/g, " ")
-            .replace(/\\\(/g, "(")
-            .replace(/\\\)/g, ")")
-            .replace(/\\\\/g, "\\")
-            // Collapse excessive whitespace
-            .replace(/  +/g, " ")
-            .trim();
+          const text = extractPdfText(buffer);
 
           if (text.length > 0) {
             return json({ filename: name, format: "pdf", content: text });
           }
 
-          // If no text extracted (scanned PDF or image-only), return URL
           return json({
             filename: name,
             format: "pdf",

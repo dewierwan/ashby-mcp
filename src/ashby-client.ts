@@ -3,6 +3,7 @@ import type {
   AshbyListResponse,
   AshbyErrorResponse,
 } from "./types.js";
+import { logger } from "./logger.js";
 
 const BASE_URL = "https://api.ashbyhq.com";
 const API_TIMEOUT_MS = 30_000;
@@ -32,6 +33,7 @@ export class AshbyClient {
     const body = JSON.stringify(params ?? {});
 
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      const t0 = Date.now();
       const response = await fetch(url, {
         method: "POST",
         headers: {
@@ -43,10 +45,15 @@ export class AshbyClient {
         signal: AbortSignal.timeout(API_TIMEOUT_MS),
       });
 
-      if (response.ok) return response;
+      const ms = Date.now() - t0;
+      if (response.ok) {
+        logger.debug("api request", { endpoint, status: response.status, ms });
+        return response;
+      }
 
       const retryable = response.status === 429 || response.status >= 500;
       if (!retryable || attempt === MAX_RETRIES - 1) {
+        logger.error("api request failed", { endpoint, status: response.status, attempt: attempt + 1, ms });
         throw new AshbyApiError(
           `HTTP ${response.status}: ${response.statusText}`,
           response.status
@@ -58,6 +65,7 @@ export class AshbyClient {
       const delayMs = retryAfter
         ? parseInt(retryAfter, 10) * 1000 || BASE_DELAY_MS
         : BASE_DELAY_MS * 2 ** attempt;
+      logger.warn("api retry", { endpoint, status: response.status, attempt: attempt + 1, delayMs });
       await new Promise((r) => setTimeout(r, delayMs));
     }
 
@@ -86,7 +94,9 @@ export class AshbyClient {
     const data = (await response.json()) as AshbyResponse<T>;
 
     if (!data.success) {
-      throw this.parseError(data as AshbyErrorResponse);
+      const err = this.parseError(data as AshbyErrorResponse);
+      logger.error("api error", { endpoint, code: err.code, message: err.message });
+      throw err;
     }
 
     return (data as { success: true; results: T }).results;
@@ -108,7 +118,9 @@ export class AshbyClient {
     const data = (await response.json()) as AshbyListResponse<T>;
 
     if (!data.success) {
-      throw this.parseError(data as AshbyErrorResponse);
+      const err = this.parseError(data as AshbyErrorResponse);
+      logger.error("api error", { endpoint, code: err.code, message: err.message });
+      throw err;
     }
 
     const ok = data as {
