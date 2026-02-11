@@ -77,12 +77,14 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
       try {
         const params: Record<string, unknown> = { limit };
         if (cursor) params.cursor = cursor;
-        if (status !== "All") params.status = status;
 
         const page = await client.requestList<Job>("job.list", params);
+        const filtered = status === "All"
+          ? page.results
+          : page.results.filter((j) => j.status === status);
 
         return json({
-          items: page.results.map((j) => ({
+          items: filtered.map((j) => ({
             id: j.id,
             title: j.title,
             status: j.status,
@@ -971,10 +973,11 @@ Response: jobs[] (job_id, job_title, total_active, total_archived, stages[] (sta
           const job = await client.request<{ id: string; title: string }>("job.info", { id: job_id });
           jobIds = [{ id: job.id, title: job.title }];
         } else {
-          const params: Record<string, unknown> = { limit: 100 };
-          if (status !== "All") params.status = status;
-          const jobPage = await client.requestList<{ id: string; title: string }>("job.list", params);
-          jobIds = jobPage.results.map((j) => ({ id: j.id, title: j.title }));
+          const jobPage = await client.requestList<Job>("job.list", { limit: 100 });
+          const filtered = status === "All"
+            ? jobPage.results
+            : jobPage.results.filter((j) => j.status === status);
+          jobIds = filtered.map((j) => ({ id: j.id, title: j.title }));
         }
 
         let totalActive = 0;

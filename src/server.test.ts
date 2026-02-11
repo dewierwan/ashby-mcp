@@ -117,34 +117,45 @@ describe("createServer", () => {
       expect(data.next_cursor).toBeNull();
     });
 
-    it("passes status filter to the API (not All)", async () => {
+    it("filters by status client-side", async () => {
       mockRequestList.mockResolvedValueOnce({
-        results: [],
+        results: [
+          { id: "j1", title: "Open Job", status: "Open", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
+          { id: "j2", title: "Closed Job", status: "Closed", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
+        ],
         moreDataAvailable: false,
       });
 
       const client = await setupClient();
-      await client.callTool({
+      const result = await client.callTool({
         name: "ashby_list_jobs",
         arguments: { status: "Closed" },
       });
+      const data = getJson(result) as { items: { id: string }[] };
 
-      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25, status: "Closed" });
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].id).toBe("j2");
+      // Status should NOT be passed to the API
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25 });
     });
 
-    it("omits status param when filtering by All", async () => {
+    it("returns all jobs when status is All", async () => {
       mockRequestList.mockResolvedValueOnce({
-        results: [],
+        results: [
+          { id: "j1", title: "Open", status: "Open", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
+          { id: "j2", title: "Closed", status: "Closed", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
+        ],
         moreDataAvailable: false,
       });
 
       const client = await setupClient();
-      await client.callTool({
+      const result = await client.callTool({
         name: "ashby_list_jobs",
         arguments: { status: "All" },
       });
+      const data = getJson(result) as { items: { id: string }[] };
 
-      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25 });
+      expect(data.items).toHaveLength(2);
     });
 
     it("returns error ToolResult on API failure", async () => {
@@ -699,12 +710,12 @@ describe("createServer", () => {
     });
 
     it("summarizes all open jobs when no job_id provided", async () => {
-      // First call: job.list
+      // First call: job.list (returns all jobs, client filters to Open)
       mockRequestList
         .mockResolvedValueOnce({
           results: [
-            { id: "j1", title: "Engineer" },
-            { id: "j2", title: "Designer" },
+            { id: "j1", title: "Engineer", status: "Open" },
+            { id: "j2", title: "Designer", status: "Open" },
           ],
           moreDataAvailable: false,
         })
