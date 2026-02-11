@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { inflateSync } from "node:zlib";
 import { AshbyClient, AshbyApiError } from "./ashby-client.js";
 import type {
   Job,
@@ -36,7 +37,7 @@ function json(data: unknown): ToolResult {
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "ashby",
-    version: "1.0.0",
+    version: "1.1.0",
   });
 
   const client = new AshbyClient();
@@ -589,7 +590,206 @@ Response: updated application with new current_stage.`,
     }
   );
 
-  // ── 12. ashby_add_candidate_tag ─────────────────────────────────────────
+  // ── 12. ashby_get_resume ───────────────────────────────────────────────
+
+  server.tool(
+    "ashby_get_resume",
+    `Download and read a candidate's resume or uploaded file.
+
+Use this after ashby_get_candidate to read the actual content of a resume or file.
+Takes a file handle string from the candidate's fileHandles array.
+Fetches the file URL from Ashby, downloads the file, and returns the text content.
+
+Supports PDF, DOCX (as plain text), and plain text files. For other formats, returns the download URL.
+
+Response: filename, content (extracted text), or url (for unsupported formats).`,
+    {
+      file_handle: z.string().describe("The file handle string from a candidate's fileHandles array."),
+      file_name: z.string().optional().describe("Original filename (helps determine format). Optional."),
+    },
+    async ({ file_handle, file_name }) => {
+      try {
+        // Get the download URL from Ashby
+        const result = await client.request<{ url: string }>("file.info", {
+          fileHandle: file_handle,
+        });
+
+        const url = result.url;
+        if (!url) {
+          return json({ error: "No download URL returned by Ashby." });
+        }
+
+        // Download the file
+        const response = await fetch(url);
+        if (!response.ok) {
+          return json({
+            error: `Failed to download file: HTTP ${response.status}`,
+            url,
+          });
+        }
+
+        const contentType = response.headers.get("content-type") ?? "";
+        const name = file_name ?? "unknown";
+        const ext = name.split(".").pop()?.toLowerCase() ?? "";
+
+        // For plain text files, return content directly
+        if (contentType.includes("text/") || ["txt", "md", "csv"].includes(ext)) {
+          const text = await response.text();
+          return json({ filename: name, content: text });
+        }
+
+        // For PDFs, extract text from the binary
+        if (contentType.includes("pdf") || ext === "pdf") {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const raw = buffer.toString("latin1");
+
+          // Decode all streams (decompress FlateDecode where needed)
+          const decodedStreams: string[] = [];
+          const streamRegex = /stream\r?\n([\s\S]*?)endstream/g;
+          let sMatch;
+          while ((sMatch = streamRegex.exec(raw)) !== null) {
+            const before = raw.substring(Math.max(0, sMatch.index - 300), sMatch.index);
+            const isFlate = /\/Filter\s*\/FlateDecode/.test(before);
+            if (isFlate) {
+              try {
+                decodedStreams.push(inflateSync(Buffer.from(sMatch[1], "latin1")).toString("latin1"));
+              } catch {
+                // skip undecompressable streams
+              }
+            } else {
+              decodedStreams.push(sMatch[1]);
+            }
+          }
+
+          // Build CMap: parse beginbfchar/beginbfrange sections to map glyph codes to Unicode
+          const cmap = new Map<string, string>();
+          for (const s of decodedStreams) {
+            // bfchar: <src> <dst>
+            const charBlock = /beginbfchar([\s\S]*?)endbfchar/g;
+            let cb;
+            while ((cb = charBlock.exec(s)) !== null) {
+              const pairs = /\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+              let p;
+              while ((p = pairs.exec(cb[1])) !== null) {
+                const hex = p[2];
+                let ch = "";
+                for (let i = 0; i < hex.length; i += 4) {
+                  ch += String.fromCodePoint(parseInt(hex.substring(i, i + 4), 16));
+                }
+                cmap.set(p[1].toLowerCase(), ch);
+              }
+            }
+            // bfrange: <srcLo> <srcHi> <dstStart>
+            const rangeBlock = /beginbfrange([\s\S]*?)endbfrange/g;
+            let rb;
+            while ((rb = rangeBlock.exec(s)) !== null) {
+              const ranges = /\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>\s*<([0-9A-Fa-f]+)>/g;
+              let r;
+              while ((r = ranges.exec(rb[1])) !== null) {
+                const lo = parseInt(r[1], 16);
+                const hi = parseInt(r[2], 16);
+                let dst = parseInt(r[3], 16);
+                const padLen = r[1].length;
+                for (let code = lo; code <= hi; code++) {
+                  cmap.set(code.toString(16).padStart(padLen, "0").toLowerCase(), String.fromCodePoint(dst++));
+                }
+              }
+            }
+          }
+
+          // Decode a hex string using CMap, falling back to raw char codes
+          function decodeHex(hex: string): string {
+            // Determine glyph width (1 or 2 bytes) from CMap keys
+            const keyLen = cmap.size > 0 ? [...cmap.keys()][0].length : 2;
+            let result = "";
+            for (let i = 0; i < hex.length; i += keyLen) {
+              const code = hex.substring(i, i + keyLen).toLowerCase();
+              if (cmap.has(code)) {
+                result += cmap.get(code);
+              } else {
+                const cp = parseInt(code, 16);
+                if (cp >= 0x20 && cp < 0x7f) result += String.fromCharCode(cp);
+              }
+            }
+            return result;
+          }
+
+          // Extract text from content streams
+          const textChunks: string[] = [];
+          for (const s of decodedStreams) {
+            // Skip CMap and font streams
+            if (/beginbfchar|beginbfrange|\/CIDInit/.test(s)) continue;
+
+            // Hex string Tj: <hex> Tj
+            const hexTj = /<([0-9A-Fa-f]+)>\s*Tj/g;
+            let hm;
+            while ((hm = hexTj.exec(s)) !== null) {
+              textChunks.push(decodeHex(hm[1]));
+            }
+            // Parenthesized string Tj: (text) Tj
+            const parenTj = /\(([^)]*)\)\s*Tj/g;
+            let pm;
+            while ((pm = parenTj.exec(s)) !== null) {
+              textChunks.push(pm[1]);
+            }
+            // TJ arrays with hex: [<hex> num <hex> ...] TJ
+            const tjArr = /\[((?:<[0-9A-Fa-f]+>|\([^)]*\)|[^\]])*)\]\s*TJ/g;
+            let am;
+            while ((am = tjArr.exec(s)) !== null) {
+              const inner = am[1];
+              const hexInner = /<([0-9A-Fa-f]+)>/g;
+              let hi;
+              while ((hi = hexInner.exec(inner)) !== null) {
+                textChunks.push(decodeHex(hi[1]));
+              }
+              const parenInner = /\(([^)]*)\)/g;
+              let pi;
+              while ((pi = parenInner.exec(inner)) !== null) {
+                textChunks.push(pi[1]);
+              }
+            }
+          }
+
+          // Clean up and join
+          const text = textChunks
+            .join(" ")
+            .replace(/\\n/g, "\n")
+            .replace(/\\r/g, "")
+            .replace(/\\t/g, " ")
+            .replace(/\\\(/g, "(")
+            .replace(/\\\)/g, ")")
+            .replace(/\\\\/g, "\\")
+            // Collapse excessive whitespace
+            .replace(/  +/g, " ")
+            .trim();
+
+          if (text.length > 0) {
+            return json({ filename: name, format: "pdf", content: text });
+          }
+
+          // If no text extracted (scanned PDF or image-only), return URL
+          return json({
+            filename: name,
+            format: "pdf",
+            content: "(Could not extract text — PDF may be scanned/image-only. Use the URL to view it directly.)",
+            url,
+          });
+        }
+
+        // For other formats, just return the URL
+        return json({
+          filename: name,
+          format: ext || contentType,
+          content: "(Unsupported format for text extraction. Use the URL to view it directly.)",
+          url,
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 13. ashby_add_candidate_tag ─────────────────────────────────────────
 
   server.tool(
     "ashby_add_candidate_tag",
