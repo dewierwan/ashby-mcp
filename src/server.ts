@@ -711,7 +711,102 @@ Response: confirmation message.`,
     }
   );
 
-  // ── 14. ashby_list_applications ───────────────────────────────────────
+  // ── 14. ashby_get_application_form_submission ────────────────────────
+
+  server.tool(
+    "ashby_get_application_form_submission",
+    `Get a candidate's submitted application form responses for a specific application.
+
+Use this to read what a candidate actually wrote in their application — their answers to screening questions,
+cover letter text, and any other form fields.
+Use after ashby_list_candidates_for_job or ashby_get_application_details when you need to evaluate a candidate's application content.
+
+Response: application_id, candidate_name, job_title, form_responses[] (question, field_type, answer).`,
+    {
+      application_id: z.string().describe("The application ID (UUID) to fetch form responses for."),
+    },
+    async ({ application_id }) => {
+      try {
+        const app = await client.request<{
+          id: string;
+          candidate: { name: string };
+          job: { title: string };
+          applicationFormSubmissions?: Array<{
+            formDefinition: {
+              sections: Array<{
+                fields: Array<{
+                  field: { title: string; type: string; path: string };
+                }>;
+              }>;
+            };
+            submittedValues: Record<string, unknown>;
+          }>;
+        }>("application.info", {
+          applicationId: application_id,
+          expand: ["applicationFormSubmissions"],
+        });
+
+        const submissions = app.applicationFormSubmissions ?? [];
+        if (submissions.length === 0) {
+          return json({
+            application_id: app.id,
+            candidate_name: app.candidate.name,
+            job_title: app.job.title,
+            form_responses: [],
+            message: "No application form submission found for this application.",
+          });
+        }
+
+        // Build path→title+type lookup from the form definition
+        const fieldMap = new Map<string, { title: string; type: string }>();
+        for (const sub of submissions) {
+          for (const section of sub.formDefinition.sections) {
+            for (const f of section.fields) {
+              fieldMap.set(f.field.path, { title: f.field.title, type: f.field.type });
+            }
+          }
+        }
+
+        // Map submitted values to readable question/answer pairs
+        const formResponses: Array<{ question: string; field_type: string; answer: string }> = [];
+        for (const sub of submissions) {
+          for (const [path, value] of Object.entries(sub.submittedValues)) {
+            const field = fieldMap.get(path);
+            const question = field?.title ?? path;
+            const fieldType = field?.type ?? "unknown";
+
+            // Format the answer based on type
+            let answer: string;
+            if (value === null || value === undefined) {
+              answer = "(empty)";
+            } else if (typeof value === "boolean") {
+              answer = value ? "Yes" : "No";
+            } else if (typeof value === "object" && value !== null && "text" in value) {
+              // Location objects have a .text field
+              answer = String((value as { text: string }).text);
+            } else if (typeof value === "object") {
+              answer = JSON.stringify(value);
+            } else {
+              answer = String(value);
+            }
+
+            formResponses.push({ question, field_type: fieldType, answer });
+          }
+        }
+
+        return json({
+          application_id: app.id,
+          candidate_name: app.candidate.name,
+          job_title: app.job.title,
+          form_responses: formResponses,
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 15. ashby_list_applications ───────────────────────────────────────
 
   server.tool(
     "ashby_list_applications",

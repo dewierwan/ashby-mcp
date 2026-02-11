@@ -54,16 +54,17 @@ describe("createServer", () => {
     delete process.env.ASHBY_API_KEY;
   });
 
-  it("registers all 15 tools", async () => {
+  it("registers all 16 tools", async () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(15);
+    expect(tools).toHaveLength(16);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
       "ashby_add_candidate_tag",
       "ashby_get_application_details",
+      "ashby_get_application_form_submission",
       "ashby_get_candidate",
       "ashby_get_candidate_notes",
       "ashby_get_feedback",
@@ -364,6 +365,103 @@ describe("createServer", () => {
 
       expect(data.application_id).toBe("app-1");
       expect(data.new_stage.title).toBe("On-site");
+    });
+  });
+
+  describe("ashby_get_application_form_submission", () => {
+    it("returns form responses with resolved field titles", async () => {
+      mockRequest.mockResolvedValueOnce({
+        id: "app-1",
+        candidate: { name: "Alice" },
+        job: { title: "Engineer" },
+        applicationFormSubmissions: [
+          {
+            formDefinition: {
+              sections: [
+                {
+                  fields: [
+                    { field: { title: "Name", type: "String", path: "_systemfield_name" } },
+                    { field: { title: "Why this role?", type: "LongText", path: "field-1" } },
+                    { field: { title: "Location", type: "Location", path: "field-2" } },
+                    { field: { title: "Interested in other roles?", type: "Boolean", path: "field-3" } },
+                  ],
+                },
+              ],
+            },
+            submittedValues: {
+              "_systemfield_name": "Alice",
+              "field-1": "I love engineering",
+              "field-2": { text: "London, UK", providerLocationId: "london" },
+              "field-3": true,
+            },
+          },
+        ],
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_application_form_submission",
+        arguments: { application_id: "app-1" },
+      });
+      const data = getJson(result) as {
+        candidate_name: string;
+        job_title: string;
+        form_responses: { question: string; field_type: string; answer: string }[];
+      };
+
+      expect(data.candidate_name).toBe("Alice");
+      expect(data.job_title).toBe("Engineer");
+      expect(data.form_responses).toHaveLength(4);
+
+      const whyRole = data.form_responses.find((r) => r.question === "Why this role?");
+      expect(whyRole?.answer).toBe("I love engineering");
+      expect(whyRole?.field_type).toBe("LongText");
+
+      const location = data.form_responses.find((r) => r.question === "Location");
+      expect(location?.answer).toBe("London, UK");
+
+      const boolean = data.form_responses.find((r) => r.question === "Interested in other roles?");
+      expect(boolean?.answer).toBe("Yes");
+    });
+
+    it("returns empty form_responses when no submission exists", async () => {
+      mockRequest.mockResolvedValueOnce({
+        id: "app-2",
+        candidate: { name: "Bob" },
+        job: { title: "Designer" },
+        applicationFormSubmissions: [],
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_application_form_submission",
+        arguments: { application_id: "app-2" },
+      });
+      const data = getJson(result) as {
+        form_responses: unknown[];
+        message: string;
+      };
+
+      expect(data.form_responses).toHaveLength(0);
+      expect(data.message).toContain("No application form submission");
+    });
+
+    it("handles missing applicationFormSubmissions field gracefully", async () => {
+      mockRequest.mockResolvedValueOnce({
+        id: "app-3",
+        candidate: { name: "Charlie" },
+        job: { title: "PM" },
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_application_form_submission",
+        arguments: { application_id: "app-3" },
+      });
+      const data = getJson(result) as { form_responses: unknown[]; message: string };
+
+      expect(data.form_responses).toHaveLength(0);
+      expect(data.message).toContain("No application form submission");
     });
   });
 
