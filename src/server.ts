@@ -38,7 +38,7 @@ function json(data: unknown): ToolResult {
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "ashby",
-    version: "1.1.0",
+    version: "1.2.0",
   });
 
   const client = new AshbyClient();
