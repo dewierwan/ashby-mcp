@@ -112,6 +112,23 @@ export interface Job {
   closedAt?: string;
 }
 
+// ─── Archive reason ─────────────────────────────────────────────────────────
+
+export interface ArchiveReason {
+  id: string;
+  text: string;
+  reasonType: string;
+  isArchived: boolean;
+}
+
+// ─── Communication template ─────────────────────────────────────────────────
+
+export interface CommunicationTemplate {
+  id: string;
+  name: string;
+  [key: string]: unknown;
+}
+
 // ─── Interview stage ────────────────────────────────────────────────────────
 
 export interface InterviewStage {

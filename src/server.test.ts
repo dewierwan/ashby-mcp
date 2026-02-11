@@ -54,15 +54,17 @@ describe("createServer", () => {
     delete process.env.ASHBY_API_KEY;
   });
 
-  it("registers all 17 tools", async () => {
+  it("registers all 21 tools", async () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(17);
+    expect(tools).toHaveLength(21);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
       "ashby_add_candidate_tag",
+      "ashby_archive_application",
+      "ashby_bulk_archive",
       "ashby_get_application_details",
       "ashby_get_application_form_submission",
       "ashby_get_candidate",
@@ -72,7 +74,9 @@ describe("createServer", () => {
       "ashby_get_pipeline_summary",
       "ashby_get_resume",
       "ashby_list_applications",
+      "ashby_list_archive_reasons",
       "ashby_list_candidates_for_job",
+      "ashby_list_email_templates",
       "ashby_list_interview_stages",
       "ashby_list_jobs",
       "ashby_list_upcoming_interviews",
@@ -989,6 +993,308 @@ describe("createServer", () => {
       // Only sched-1 is in June; sched-2 is July
       expect(data.items).toHaveLength(1);
       expect(data.items[0].schedule_id).toBe("sched-1");
+    });
+  });
+
+  describe("ashby_list_archive_reasons", () => {
+    it("returns active reasons, filtering out archived ones", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          { id: "r1", text: "Not enough experience", reasonType: "Rejection", isArchived: false },
+          { id: "r2", text: "Old reason", reasonType: "Rejection", isArchived: true },
+          { id: "r3", text: "Position filled", reasonType: "Other", isArchived: false },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({ name: "ashby_list_archive_reasons", arguments: {} });
+      const data = getJson(result) as { reasons: { id: string; text: string; reasonType: string }[] };
+
+      expect(data.reasons).toHaveLength(2);
+      expect(data.reasons[0]).toEqual({ id: "r1", text: "Not enough experience", reasonType: "Rejection" });
+      expect(data.reasons[1]).toEqual({ id: "r3", text: "Position filled", reasonType: "Other" });
+      expect(mockRequestList).toHaveBeenCalledWith("archiveReason.list", {});
+    });
+
+    it("returns error on API failure", async () => {
+      mockRequestList.mockRejectedValueOnce(new AshbyApiError("Forbidden", 403, "forbidden"));
+
+      const client = await setupClient();
+      const result = await client.callTool({ name: "ashby_list_archive_reasons", arguments: {} });
+      const text = (result as { content: { type: string; text: string }[] }).content[0].text;
+
+      expect(text).toContain("Ashby API error");
+      expect(text).toContain("Forbidden");
+    });
+  });
+
+  describe("ashby_list_email_templates", () => {
+    it("returns template list", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          { id: "t1", name: "Standard Rejection", intendedTypes: ["email"] },
+          { id: "t2", name: "Post-Interview Rejection", intendedTypes: ["email"] },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({ name: "ashby_list_email_templates", arguments: {} });
+      const data = getJson(result) as { templates: { id: string; name: string }[] };
+
+      expect(data.templates).toHaveLength(2);
+      expect(data.templates[0].name).toBe("Standard Rejection");
+      expect(data.templates[1].name).toBe("Post-Interview Rejection");
+      expect(mockRequestList).toHaveBeenCalledWith("communicationTemplate.list", {});
+    });
+  });
+
+  describe("ashby_archive_application", () => {
+    it("resolves archived stage and archives with reason", async () => {
+      mockRequest.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "application.info") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview", interviewPlanId: "plan-1" },
+          });
+        }
+        if (endpoint === "application.changeStage") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Archived",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s-archived", title: "Archived", type: "Archived" },
+          });
+        }
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          { id: "s1", title: "Phone Screen", type: "Interview", orderInInterviewPlan: 1 },
+          { id: "s-archived", title: "Archived", type: "Archived", orderInInterviewPlan: 99 },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_archive_application",
+        arguments: { application_id: "app-1", archive_reason_id: "reason-1" },
+      });
+      const data = getJson(result) as { application_id: string; status: string; email_sent: boolean; message: string };
+
+      expect(data.application_id).toBe("app-1");
+      expect(data.status).toBe("Archived");
+      expect(data.email_sent).toBe(false);
+      expect(data.message).toContain("archived");
+      expect(data.message).toContain("with reason");
+
+      expect(mockRequest).toHaveBeenCalledWith("application.changeStage", {
+        applicationId: "app-1",
+        interviewStageId: "s-archived",
+        archiveReasonId: "reason-1",
+      });
+    });
+
+    it("includes archiveEmail when send_email is true", async () => {
+      mockRequest.mockImplementation((endpoint: string) => {
+        if (endpoint === "application.info") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview", interviewPlanId: "plan-1" },
+          });
+        }
+        if (endpoint === "application.changeStage") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Archived",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+          });
+        }
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+      mockRequestList.mockResolvedValueOnce({
+        results: [{ id: "s-archived", title: "Archived", type: "Archived", orderInInterviewPlan: 99 }],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      await client.callTool({
+        name: "ashby_archive_application",
+        arguments: { application_id: "app-1", send_email: true, email_template_id: "tmpl-1" },
+      });
+
+      expect(mockRequest).toHaveBeenCalledWith("application.changeStage", {
+        applicationId: "app-1",
+        interviewStageId: "s-archived",
+        archiveEmail: { communicationTemplateId: "tmpl-1" },
+      });
+    });
+
+    it("returns error when send_email is true but no email_template_id", async () => {
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_archive_application",
+        arguments: { application_id: "app-1", send_email: true },
+      });
+      const data = getJson(result) as { error: string };
+
+      expect(data.error).toContain("email_template_id is required");
+    });
+
+    it("falls back to job.info when interviewPlanId not on stage", async () => {
+      mockRequest.mockImplementation((endpoint: string) => {
+        if (endpoint === "application.info") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview" },
+          });
+        }
+        if (endpoint === "job.info") {
+          return Promise.resolve({
+            id: "j1",
+            title: "Engineer",
+            interviewPlanIds: ["plan-1"],
+            createdAt: "2024-01-01",
+            updatedAt: "2024-01-02",
+          });
+        }
+        if (endpoint === "application.changeStage") {
+          return Promise.resolve({
+            id: "app-1",
+            status: "Archived",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+          });
+        }
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+      mockRequestList.mockResolvedValueOnce({
+        results: [{ id: "s-archived", title: "Archived", type: "Archived", orderInInterviewPlan: 99 }],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_archive_application",
+        arguments: { application_id: "app-1" },
+      });
+      const data = getJson(result) as { application_id: string; status: string };
+
+      expect(data.application_id).toBe("app-1");
+      expect(data.status).toBe("Archived");
+      expect(mockRequest).toHaveBeenCalledWith("job.info", { id: "j1" });
+    });
+  });
+
+  describe("ashby_bulk_archive", () => {
+    it("archives multiple applications with cached stage lookups", async () => {
+      mockRequest.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "application.info") {
+          return Promise.resolve({
+            id: params.applicationId,
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview", interviewPlanId: "plan-1" },
+          });
+        }
+        if (endpoint === "application.changeStage") {
+          return Promise.resolve({
+            id: params.applicationId,
+            status: "Archived",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+          });
+        }
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+      // Stage list should only be fetched once due to caching
+      mockRequestList.mockResolvedValue({
+        results: [{ id: "s-archived", title: "Archived", type: "Archived", orderInInterviewPlan: 99 }],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_bulk_archive",
+        arguments: { application_ids: ["app-1", "app-2", "app-3"] },
+      });
+      const data = getJson(result) as { total: number; succeeded: number; failed: number; results: { application_id: string; success: boolean }[] };
+
+      expect(data.total).toBe(3);
+      expect(data.succeeded).toBe(3);
+      expect(data.failed).toBe(0);
+      expect(data.results).toHaveLength(3);
+      expect(data.results.every((r) => r.success)).toBe(true);
+    });
+
+    it("handles partial failures gracefully", async () => {
+      mockRequest.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "application.info") {
+          if (params.applicationId === "app-bad") {
+            return Promise.reject(new AshbyApiError("Not found", 404, "not_found"));
+          }
+          return Promise.resolve({
+            id: params.applicationId,
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview", interviewPlanId: "plan-1" },
+          });
+        }
+        if (endpoint === "application.changeStage") {
+          return Promise.resolve({
+            id: params.applicationId,
+            status: "Archived",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+          });
+        }
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+      mockRequestList.mockResolvedValue({
+        results: [{ id: "s-archived", title: "Archived", type: "Archived", orderInInterviewPlan: 99 }],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_bulk_archive",
+        arguments: { application_ids: ["app-1", "app-bad", "app-3"] },
+      });
+      const data = getJson(result) as { total: number; succeeded: number; failed: number; results: { application_id: string; success: boolean; error?: string }[] };
+
+      expect(data.total).toBe(3);
+      expect(data.succeeded).toBe(2);
+      expect(data.failed).toBe(1);
+
+      const failedResult = data.results.find((r) => r.application_id === "app-bad");
+      expect(failedResult?.success).toBe(false);
+      expect(failedResult?.error).toContain("Not found");
+    });
+
+    it("returns error when send_email is true but no email_template_id", async () => {
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_bulk_archive",
+        arguments: { application_ids: ["app-1"], send_email: true },
+      });
+      const data = getJson(result) as { error: string };
+
+      expect(data.error).toContain("email_template_id is required");
     });
   });
 

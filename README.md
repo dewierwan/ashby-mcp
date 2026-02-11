@@ -13,7 +13,8 @@ This server exposes Ashby's recruiting data through the [Model Context Protocol]
    - `candidatesRead` — read candidate profiles, applications, notes, feedback
    - `jobsRead` — read job listings and details
    - `interviewsRead` — read interview stages and plans
-   - `candidatesWrite` — add notes, tags, and move application stages
+   - `candidatesWrite` — add notes, tags, move application stages, archive applications
+   - `hiringProcessMetadataRead` — list archive reasons and email templates
 
 ### 2. Install
 
@@ -85,6 +86,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `ashby_get_resume` | Download and extract text from a candidate's resume (PDF, text) |
 | `ashby_list_applications` | List applications across all jobs with date, status, stage, and source filters |
 | `ashby_get_pipeline_summary` | Pipeline overview with candidate counts per stage, per job |
+| `ashby_list_archive_reasons` | List available archive/rejection reasons |
+| `ashby_list_email_templates` | List email templates for rejection emails |
 
 ### Write tools
 
@@ -93,6 +96,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `ashby_add_candidate_note` | Add an evaluation note to a candidate |
 | `ashby_move_application_stage` | Move an application to a different interview stage |
 | `ashby_add_candidate_tag` | Tag a candidate (e.g. "Strong Hire") |
+| `ashby_archive_application` | Archive an application with reason and optional rejection email |
+| `ashby_bulk_archive` | Archive multiple applications at once (max 25) |
 
 ## Example Prompts
 
@@ -116,6 +121,12 @@ How many people applied this week?
 What does our pipeline look like for the Community Lead role?
 
 Show me all candidates currently in the Work test stage.
+
+Archive John Smith's application for the Senior Engineer role with reason "Not enough experience" and send the standard rejection email.
+
+Show me the available archive reasons and rejection email templates.
+
+Bulk archive all candidates in Application Review for the closed Designer role.
 ```
 
 ## Testing

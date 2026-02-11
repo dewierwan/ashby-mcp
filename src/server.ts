@@ -17,6 +17,8 @@ import type {
   ApplicationHistoryEntry,
   CriteriaEvaluation,
   ApplicationFeedback,
+  ArchiveReason,
+  CommunicationTemplate,
 } from "./types.js";
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
@@ -42,7 +44,15 @@ function json(data: unknown): ToolResult {
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "ashby",
+    title: "Ashby",
     version,
+    description: "Ashby ATS — candidate evaluation workflow",
+    icons: [
+      {
+        src: "https://www.ashbyhq.com/favicon.png",
+        mimeType: "image/png",
+      },
+    ],
   });
 
   const client = new AshbyClient();
@@ -1198,6 +1208,250 @@ Response: items[] (schedule_id, status, candidate_name, candidate_id, job_title,
         });
 
         return json({ items });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 18. ashby_list_archive_reasons ──────────────────────────────────────
+
+  server.tool(
+    "ashby_list_archive_reasons",
+    `List available archive/rejection reasons.
+
+Use this as the first step when archiving a candidate. Returns reasons you can pass to ashby_archive_application.
+Requires the "hiringProcessMetadataRead" API key permission.
+
+Response: reasons[] (id, text, reasonType).`,
+    {},
+    async () => {
+      try {
+        const page = await client.requestList<ArchiveReason>("archiveReason.list", {});
+
+        return json({
+          reasons: page.results
+            .filter((r) => !r.isArchived)
+            .map((r) => ({
+              id: r.id,
+              text: r.text,
+              reasonType: r.reasonType,
+            })),
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 19. ashby_list_email_templates ────────────────────────────────────
+
+  server.tool(
+    "ashby_list_email_templates",
+    `List available email templates for rejection/archive emails.
+
+Use this to find the template ID to pass to ashby_archive_application when sending a rejection email.
+Requires the "hiringProcessMetadataRead" API key permission.
+
+Response: templates[] (id, name, and any other fields returned by the API).`,
+    {},
+    async () => {
+      try {
+        const page = await client.requestList<CommunicationTemplate>("communicationTemplate.list", {});
+
+        return json({
+          templates: page.results.map((t) => {
+            const { id, name, ...rest } = t;
+            return { id, name, ...rest };
+          }),
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 20. ashby_archive_application ────────────────────────────────────
+
+  server.tool(
+    "ashby_archive_application",
+    `Archive an application with an optional reason and rejection email.
+
+Workflow: call ashby_list_archive_reasons to pick a reason, then ashby_list_email_templates to pick an email template, then call this tool.
+Automatically resolves the correct "Archived" interview stage for the application's job.
+
+Response: application_id, status, archive_reason_id, email_sent, message.`,
+    {
+      application_id: z.string().describe("The application ID (UUID) to archive."),
+      archive_reason_id: z
+        .string()
+        .optional()
+        .describe("Archive reason ID from ashby_list_archive_reasons."),
+      send_email: z
+        .boolean()
+        .default(false)
+        .describe("Whether to send a rejection email. Requires email_template_id."),
+      email_template_id: z
+        .string()
+        .optional()
+        .describe("Communication template ID from ashby_list_email_templates. Required when send_email is true."),
+    },
+    async ({ application_id, archive_reason_id, send_email, email_template_id }) => {
+      try {
+        if (send_email && !email_template_id) {
+          return json({ error: "email_template_id is required when send_email is true. Use ashby_list_email_templates to find available templates." });
+        }
+
+        // 1. Get application to find its interview plan
+        const app = await client.request<Application>("application.info", { applicationId: application_id });
+
+        // 2. Resolve the interview plan ID
+        let interviewPlanId = app.currentInterviewStage?.interviewPlanId;
+        if (!interviewPlanId) {
+          const job = await client.request<Job>("job.info", { id: app.job.id });
+          interviewPlanId = (job.interviewPlanIds ?? [])[0] ?? job.defaultInterviewPlanId;
+        }
+        if (!interviewPlanId) {
+          return json({ error: `Could not determine interview plan for application ${application_id}.` });
+        }
+
+        // 3. Find the "Archived" stage in this plan
+        const stagePage = await client.requestList<InterviewStage>("interviewStage.list", { interviewPlanId });
+        const archivedStage = stagePage.results.find((s) => s.type === "Archived");
+        if (!archivedStage) {
+          return json({ error: `No archived stage found in interview plan ${interviewPlanId}.` });
+        }
+
+        // 4. Build the changeStage request
+        const params: Record<string, unknown> = {
+          applicationId: application_id,
+          interviewStageId: archivedStage.id,
+        };
+        if (archive_reason_id) params.archiveReasonId = archive_reason_id;
+        if (send_email && email_template_id) {
+          params.archiveEmail = { communicationTemplateId: email_template_id };
+        }
+
+        const result = await client.request<Application>("application.changeStage", params);
+
+        return json({
+          application_id: result.id,
+          status: result.status,
+          archive_reason_id: archive_reason_id ?? null,
+          email_sent: send_email && !!email_template_id,
+          message: `Application ${result.id} archived${archive_reason_id ? " with reason" : ""}${send_email ? " and rejection email queued" : ""}.`,
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 21. ashby_bulk_archive ───────────────────────────────────────────
+
+  server.tool(
+    "ashby_bulk_archive",
+    `Archive multiple applications at once with an optional reason and rejection email.
+
+Accepts up to 25 application IDs. Uses the same archiving logic as ashby_archive_application for each one.
+Caches interview plan lookups for efficiency when applications share the same job.
+
+Response: total, succeeded, failed, results[] (application_id, success, error?).`,
+    {
+      application_ids: z
+        .array(z.string())
+        .min(1)
+        .max(25)
+        .describe("Array of application IDs (UUIDs) to archive. Max 25."),
+      archive_reason_id: z
+        .string()
+        .optional()
+        .describe("Archive reason ID from ashby_list_archive_reasons. Applied to all."),
+      send_email: z
+        .boolean()
+        .default(false)
+        .describe("Whether to send rejection emails. Requires email_template_id."),
+      email_template_id: z
+        .string()
+        .optional()
+        .describe("Communication template ID from ashby_list_email_templates. Required when send_email is true."),
+    },
+    async ({ application_ids, archive_reason_id, send_email, email_template_id }) => {
+      try {
+        if (send_email && !email_template_id) {
+          return json({ error: "email_template_id is required when send_email is true. Use ashby_list_email_templates to find available templates." });
+        }
+
+        // Cache: interviewPlanId → archived stage ID
+        const archivedStageCache = new Map<string, string>();
+
+        async function archiveOne(appId: string): Promise<{ application_id: string; success: boolean; error?: string }> {
+          // 1. Get application
+          const app = await client.request<Application>("application.info", { applicationId: appId });
+
+          // 2. Resolve interview plan ID
+          let planId = app.currentInterviewStage?.interviewPlanId;
+          if (!planId) {
+            const job = await client.request<Job>("job.info", { id: app.job.id });
+            planId = (job.interviewPlanIds ?? [])[0] ?? job.defaultInterviewPlanId;
+          }
+          if (!planId) {
+            return { application_id: appId, success: false, error: "Could not determine interview plan." };
+          }
+
+          // 3. Find archived stage (cached)
+          let archivedStageId = archivedStageCache.get(planId);
+          if (!archivedStageId) {
+            const stagePage = await client.requestList<InterviewStage>("interviewStage.list", { interviewPlanId: planId });
+            const archived = stagePage.results.find((s) => s.type === "Archived");
+            if (!archived) {
+              return { application_id: appId, success: false, error: `No archived stage in plan ${planId}.` };
+            }
+            archivedStageId = archived.id;
+            archivedStageCache.set(planId, archivedStageId);
+          }
+
+          // 4. Archive
+          const params: Record<string, unknown> = {
+            applicationId: appId,
+            interviewStageId: archivedStageId,
+          };
+          if (archive_reason_id) params.archiveReasonId = archive_reason_id;
+          if (send_email && email_template_id) {
+            params.archiveEmail = { communicationTemplateId: email_template_id };
+          }
+
+          await client.request<Application>("application.changeStage", params);
+          return { application_id: appId, success: true };
+        }
+
+        // Process in batches of 5
+        const results: Array<{ application_id: string; success: boolean; error?: string }> = [];
+        for (let i = 0; i < application_ids.length; i += 5) {
+          const batch = application_ids.slice(i, i + 5);
+          const batchResults = await Promise.all(
+            batch.map((appId) =>
+              archiveOne(appId).catch((e) => ({
+                application_id: appId,
+                success: false,
+                error: e instanceof AshbyApiError
+                  ? `Ashby API error: ${e.message}${e.code ? ` (${e.code})` : ""}`
+                  : e instanceof Error ? e.message : String(e),
+              }))
+            )
+          );
+          results.push(...batchResults);
+        }
+
+        const succeeded = results.filter((r) => r.success).length;
+        const failed = results.filter((r) => !r.success).length;
+
+        return json({
+          total: results.length,
+          succeeded,
+          failed,
+          results,
+        });
       } catch (e) {
         return error(e);
       }
