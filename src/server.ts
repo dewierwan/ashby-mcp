@@ -1,8 +1,12 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { createRequire } from "node:module";
 import { AshbyClient, AshbyApiError } from "./ashby-client.js";
 import { extractPdfText } from "./pdf.js";
 import { logger } from "./logger.js";
+
+const require = createRequire(import.meta.url);
+const { version } = require("../package.json") as { version: string };
 import type {
   Job,
   Application,
@@ -38,7 +42,7 @@ function json(data: unknown): ToolResult {
 export function createServer(): McpServer {
   const server = new McpServer({
     name: "ashby",
-    version: "1.2.0",
+    version,
   });
 
   const client = new AshbyClient();
