@@ -83,6 +83,8 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 | `ashby_list_interview_stages` | List all interview stages (pipeline reference) |
 | `ashby_get_feedback` | Submitted feedback/scorecards for an application |
 | `ashby_get_resume` | Download and extract text from a candidate's resume (PDF, text) |
+| `ashby_list_applications` | List applications across all jobs with date, status, stage, and source filters |
+| `ashby_get_pipeline_summary` | Pipeline overview with candidate counts per stage, per job |
 
 ### Write tools
 
@@ -108,6 +110,12 @@ Add a note to candidate xyz-456: "Strong technical skills demonstrated in system
 Move application abc-123 to the "Final Interview" stage.
 
 Read the resume for candidate Jane Smith and summarize her experience.
+
+How many people applied this week?
+
+What does our pipeline look like for the Community Lead role?
+
+Show me all candidates currently in the Work test stage.
 ```
 
 ## Testing

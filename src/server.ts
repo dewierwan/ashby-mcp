@@ -711,5 +711,237 @@ Response: confirmation message.`,
     }
   );
 
+  // ── 14. ashby_list_applications ───────────────────────────────────────
+
+  server.tool(
+    "ashby_list_applications",
+    `List applications across all jobs with date, status, stage, and source filters.
+
+Use this to answer operational questions like "How many people applied this week?",
+"Show me all candidates in Application Review", or "Who applied via the Chrome extension?"
+Date and status filtering happens server-side for efficiency. Stage and source filters are applied by the MCP server.
+
+Response: items[] (application_id, candidate_id, candidate_name, candidate_email, status, current_stage, source, job_id, job_title, createdAt), has_more, next_cursor.`,
+    {
+      created_after: z
+        .string()
+        .optional()
+        .describe("ISO datetime — only applications created after this timestamp (e.g. 2024-01-01T00:00:00Z)."),
+      created_before: z
+        .string()
+        .optional()
+        .describe("ISO datetime — only applications created before this timestamp. Filtered client-side."),
+      job_id: z.string().optional().describe("Filter to a specific job (UUID)."),
+      status: z
+        .enum(["Active", "Archived", "Hired", "Lead", "All"])
+        .default("All")
+        .describe("Filter by application status. Defaults to All."),
+      stage_type: z
+        .enum(["Lead", "PreInterviewScreen", "Interview", "Offer", "All"])
+        .optional()
+        .describe("Filter by interview stage type (e.g. Lead, PreInterviewScreen, Interview, Offer)."),
+      stage_name: z
+        .string()
+        .optional()
+        .describe("Filter by exact interview stage name (e.g. 'Work test', 'Application Review')."),
+      source: z
+        .string()
+        .optional()
+        .describe("Filter by source title (e.g. 'Applied', 'Ashby Chrome Extension'). Case-insensitive substring match."),
+      limit: z
+        .number()
+        .min(1)
+        .max(100)
+        .default(25)
+        .describe("Max results to return (1-100). Defaults to 25."),
+      cursor: z
+        .string()
+        .optional()
+        .describe("Pagination cursor from a previous response."),
+    },
+    async ({ created_after, created_before, job_id, status, stage_type, stage_name, source, limit, cursor }) => {
+      try {
+        const needsClientFilter = !!(created_before || stage_type || stage_name || source);
+
+        // Build server-side params
+        const params: Record<string, unknown> = {};
+        if (created_after) params.createdAfter = new Date(created_after).getTime();
+        if (job_id) params.jobId = job_id;
+        if (status !== "All") params.status = status;
+        if (cursor) params.cursor = cursor;
+
+        // If we need client-side filtering, fetch larger batches internally
+        const fetchLimit = needsClientFilter ? 100 : limit;
+        params.limit = fetchLimit;
+
+        const items: Array<{
+          application_id: string;
+          candidate_id: string;
+          candidate_name: string;
+          candidate_email: string | null;
+          status: string;
+          current_stage: { id: string; title: string; type: string } | null;
+          source: string | null;
+          job_id: string;
+          job_title: string;
+          createdAt: string;
+        }> = [];
+
+        let nextCursor: string | undefined = cursor;
+        let hasMore = false;
+
+        // Paginate internally until we have enough matching results
+        while (items.length < limit) {
+          if (nextCursor) params.cursor = nextCursor;
+
+          const page = await client.requestList<Application>("application.list", params);
+
+          for (const app of page.results) {
+            // Client-side filters
+            if (created_before && app.createdAt > created_before) continue;
+            if (stage_type && stage_type !== "All" && app.currentInterviewStage?.type !== stage_type) continue;
+            if (stage_name && app.currentInterviewStage?.title !== stage_name) continue;
+            if (source && !(app.source?.title ?? "").toLowerCase().includes(source.toLowerCase())) continue;
+
+            items.push({
+              application_id: app.id,
+              candidate_id: app.candidate.id,
+              candidate_name: app.candidate.name,
+              candidate_email: app.candidate.primaryEmailAddress?.value ?? null,
+              status: app.status,
+              current_stage: app.currentInterviewStage
+                ? {
+                    id: app.currentInterviewStage.id,
+                    title: app.currentInterviewStage.title,
+                    type: app.currentInterviewStage.type,
+                  }
+                : null,
+              source: app.source?.title ?? null,
+              job_id: app.job.id,
+              job_title: app.job.title,
+              createdAt: app.createdAt,
+            });
+
+            if (items.length >= limit) break;
+          }
+
+          hasMore = page.moreDataAvailable;
+          nextCursor = page.nextCursor;
+
+          // Stop if no more data from the API
+          if (!page.moreDataAvailable) break;
+        }
+
+        return json({
+          items: items.slice(0, limit),
+          has_more: hasMore || items.length > limit,
+          next_cursor: nextCursor ?? null,
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
+  // ── 15. ashby_get_pipeline_summary ──────────────────────────────────
+
+  server.tool(
+    "ashby_get_pipeline_summary",
+    `Get a pipeline summary showing candidate counts per interview stage, per job.
+
+Use this to answer "What does our pipeline look like?", "How many candidates at each stage?",
+or "Give me an overview of where things stand across open roles."
+The MCP server fetches and aggregates all applications internally — no need to paginate manually.
+
+Response: jobs[] (job_id, job_title, total_active, total_archived, stages[] (stage_title, stage_type, count)), totals (active, archived, leads).`,
+    {
+      job_id: z
+        .string()
+        .optional()
+        .describe("Summary for one specific job (UUID). If omitted, summarizes all jobs matching the status filter."),
+      status: z
+        .enum(["Open", "Closed", "All"])
+        .default("Open")
+        .describe("Which jobs to include. Defaults to Open."),
+    },
+    async ({ job_id, status }) => {
+      try {
+        // Determine which jobs to summarize
+        let jobIds: { id: string; title: string }[];
+        if (job_id) {
+          const job = await client.request<{ id: string; title: string }>("job.info", { id: job_id });
+          jobIds = [{ id: job.id, title: job.title }];
+        } else {
+          const params: Record<string, unknown> = { limit: 100 };
+          if (status !== "All") params.status = status;
+          const jobPage = await client.requestList<{ id: string; title: string }>("job.list", params);
+          jobIds = jobPage.results.map((j) => ({ id: j.id, title: j.title }));
+        }
+
+        let totalActive = 0;
+        let totalArchived = 0;
+        let totalLeads = 0;
+
+        const jobs = await Promise.all(
+          jobIds.map(async (job) => {
+            // Fetch all applications for this job (paginate internally)
+            const allApps: Application[] = [];
+            let cursor: string | undefined;
+            do {
+              const params: Record<string, unknown> = { jobId: job.id, limit: 100 };
+              if (cursor) params.cursor = cursor;
+              const page = await client.requestList<Application>("application.list", params);
+              allApps.push(...page.results);
+              cursor = page.moreDataAvailable ? page.nextCursor : undefined;
+            } while (cursor);
+
+            // Count by stage
+            const stageCounts = new Map<string, { title: string; type: string; count: number }>();
+            let jobActive = 0;
+            let jobArchived = 0;
+
+            for (const app of allApps) {
+              if (app.status === "Archived") {
+                jobArchived++;
+              } else {
+                jobActive++;
+              }
+
+              const stageTitle = app.currentInterviewStage?.title ?? "(No stage)";
+              const stageType = app.currentInterviewStage?.type ?? "Unknown";
+              const key = `${stageType}::${stageTitle}`;
+              const entry = stageCounts.get(key);
+              if (entry) {
+                entry.count++;
+              } else {
+                stageCounts.set(key, { title: stageTitle, type: stageType, count: 1 });
+              }
+
+              if (app.status === "Lead") totalLeads++;
+            }
+
+            totalActive += jobActive;
+            totalArchived += jobArchived;
+
+            return {
+              job_id: job.id,
+              job_title: job.title,
+              total_active: jobActive,
+              total_archived: jobArchived,
+              stages: [...stageCounts.values()].sort((a, b) => b.count - a.count),
+            };
+          })
+        );
+
+        return json({
+          jobs,
+          totals: { active: totalActive, archived: totalArchived, leads: totalLeads },
+        });
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
   return server;
 }

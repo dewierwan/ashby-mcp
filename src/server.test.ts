@@ -54,11 +54,11 @@ describe("createServer", () => {
     delete process.env.ASHBY_API_KEY;
   });
 
-  it("registers all 13 tools", async () => {
+  it("registers all 15 tools", async () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(13);
+    expect(tools).toHaveLength(15);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
@@ -68,7 +68,9 @@ describe("createServer", () => {
       "ashby_get_candidate_notes",
       "ashby_get_feedback",
       "ashby_get_job_details",
+      "ashby_get_pipeline_summary",
       "ashby_get_resume",
+      "ashby_list_applications",
       "ashby_list_candidates_for_job",
       "ashby_list_interview_stages",
       "ashby_list_jobs",
@@ -423,6 +425,252 @@ describe("createServer", () => {
       const data = getJson(result) as { error: string };
 
       expect(data.error).toContain("404");
+    });
+  });
+
+  describe("ashby_list_applications", () => {
+    it("passes date and status filters to the API", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice", primaryEmailAddress: { value: "a@co.com" } },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview" },
+            source: { title: "Applied" },
+            createdAt: "2024-06-15T10:00:00Z",
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_applications",
+        arguments: { created_after: "2024-06-01T00:00:00Z", status: "Active" },
+      });
+      const data = getJson(result) as { items: { application_id: string; job_title: string }[] };
+
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].application_id).toBe("app-1");
+      expect(data.items[0].job_title).toBe("Engineer");
+
+      // Verify server-side filters were passed
+      expect(mockRequestList).toHaveBeenCalledWith("application.list", expect.objectContaining({
+        createdAfter: new Date("2024-06-01T00:00:00Z").getTime(),
+        status: "Active",
+      }));
+    });
+
+    it("applies client-side stage_type filter", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s1", title: "Phone Screen", type: "Interview" },
+            createdAt: "2024-06-15",
+          },
+          {
+            id: "app-2",
+            status: "Lead",
+            candidate: { id: "c2", name: "Bob" },
+            job: { id: "j1", title: "Engineer" },
+            currentInterviewStage: { id: "s2", title: "New Lead", type: "Lead" },
+            createdAt: "2024-06-15",
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_applications",
+        arguments: { stage_type: "Interview" },
+      });
+      const data = getJson(result) as { items: { application_id: string }[] };
+
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].application_id).toBe("app-1");
+    });
+
+    it("applies client-side source filter (case-insensitive substring)", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "app-1",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            source: { title: "Ashby Chrome Extension" },
+            createdAt: "2024-06-15",
+          },
+          {
+            id: "app-2",
+            status: "Active",
+            candidate: { id: "c2", name: "Bob" },
+            job: { id: "j1", title: "Engineer" },
+            source: { title: "Applied" },
+            createdAt: "2024-06-15",
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_applications",
+        arguments: { source: "chrome" },
+      });
+      const data = getJson(result) as { items: { application_id: string }[] };
+
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].application_id).toBe("app-1");
+    });
+
+    it("applies client-side created_before filter", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "app-old",
+            status: "Active",
+            candidate: { id: "c1", name: "Alice" },
+            job: { id: "j1", title: "Engineer" },
+            createdAt: "2024-01-01T00:00:00Z",
+          },
+          {
+            id: "app-new",
+            status: "Active",
+            candidate: { id: "c2", name: "Bob" },
+            job: { id: "j1", title: "Engineer" },
+            createdAt: "2024-12-01T00:00:00Z",
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_applications",
+        arguments: { created_before: "2024-06-01T00:00:00Z" },
+      });
+      const data = getJson(result) as { items: { application_id: string }[] };
+
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].application_id).toBe("app-old");
+    });
+  });
+
+  describe("ashby_get_pipeline_summary", () => {
+    it("aggregates counts per stage for a single job", async () => {
+      mockRequest.mockResolvedValueOnce({ id: "j1", title: "Engineer" });
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          { id: "a1", status: "Active", currentInterviewStage: { title: "Phone Screen", type: "Interview" }, candidate: { id: "c1" }, job: { id: "j1" } },
+          { id: "a2", status: "Active", currentInterviewStage: { title: "Phone Screen", type: "Interview" }, candidate: { id: "c2" }, job: { id: "j1" } },
+          { id: "a3", status: "Active", currentInterviewStage: { title: "On-site", type: "Interview" }, candidate: { id: "c3" }, job: { id: "j1" } },
+          { id: "a4", status: "Archived", currentInterviewStage: { title: "Archived", type: "Archived" }, candidate: { id: "c4" }, job: { id: "j1" } },
+        ],
+        moreDataAvailable: false,
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_pipeline_summary",
+        arguments: { job_id: "j1" },
+      });
+      const data = getJson(result) as {
+        jobs: { job_title: string; total_active: number; total_archived: number; stages: { title: string; count: number }[] }[];
+        totals: { active: number; archived: number };
+      };
+
+      expect(data.jobs).toHaveLength(1);
+      expect(data.jobs[0].job_title).toBe("Engineer");
+      expect(data.jobs[0].total_active).toBe(3);
+      expect(data.jobs[0].total_archived).toBe(1);
+
+      const phoneScreen = data.jobs[0].stages.find((s) => s.title === "Phone Screen");
+      expect(phoneScreen?.count).toBe(2);
+
+      expect(data.totals.active).toBe(3);
+      expect(data.totals.archived).toBe(1);
+    });
+
+    it("summarizes all open jobs when no job_id provided", async () => {
+      // First call: job.list
+      mockRequestList
+        .mockResolvedValueOnce({
+          results: [
+            { id: "j1", title: "Engineer" },
+            { id: "j2", title: "Designer" },
+          ],
+          moreDataAvailable: false,
+        })
+        // Second call: application.list for j1
+        .mockResolvedValueOnce({
+          results: [
+            { id: "a1", status: "Active", currentInterviewStage: { title: "Applied", type: "PreInterviewScreen" }, candidate: { id: "c1" }, job: { id: "j1" } },
+          ],
+          moreDataAvailable: false,
+        })
+        // Third call: application.list for j2
+        .mockResolvedValueOnce({
+          results: [
+            { id: "a2", status: "Lead", currentInterviewStage: { title: "New Lead", type: "Lead" }, candidate: { id: "c2" }, job: { id: "j2" } },
+          ],
+          moreDataAvailable: false,
+        });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_pipeline_summary",
+        arguments: {},
+      });
+      const data = getJson(result) as {
+        jobs: { job_title: string }[];
+        totals: { active: number; leads: number };
+      };
+
+      expect(data.jobs).toHaveLength(2);
+      expect(data.totals.active).toBe(2);
+      expect(data.totals.leads).toBe(1);
+    });
+
+    it("paginates internally to fetch all applications", async () => {
+      mockRequest.mockResolvedValueOnce({ id: "j1", title: "Engineer" });
+      mockRequestList
+        // First page
+        .mockResolvedValueOnce({
+          results: [
+            { id: "a1", status: "Active", currentInterviewStage: { title: "Applied", type: "PreInterviewScreen" }, candidate: { id: "c1" }, job: { id: "j1" } },
+          ],
+          moreDataAvailable: true,
+          nextCursor: "page2",
+        })
+        // Second page
+        .mockResolvedValueOnce({
+          results: [
+            { id: "a2", status: "Active", currentInterviewStage: { title: "Applied", type: "PreInterviewScreen" }, candidate: { id: "c2" }, job: { id: "j1" } },
+          ],
+          moreDataAvailable: false,
+        });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_pipeline_summary",
+        arguments: { job_id: "j1" },
+      });
+      const data = getJson(result) as {
+        jobs: { total_active: number; stages: { title: string; count: number }[] }[];
+      };
+
+      expect(data.jobs[0].total_active).toBe(2);
+      expect(data.jobs[0].stages[0].count).toBe(2);
+      // Verify it fetched both pages
+      expect(mockRequestList).toHaveBeenCalledTimes(2);
     });
   });
 
