@@ -54,11 +54,11 @@ describe("createServer", () => {
     delete process.env.ASHBY_API_KEY;
   });
 
-  it("registers all 16 tools", async () => {
+  it("registers all 17 tools", async () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(16);
+    expect(tools).toHaveLength(17);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
@@ -75,6 +75,7 @@ describe("createServer", () => {
       "ashby_list_candidates_for_job",
       "ashby_list_interview_stages",
       "ashby_list_jobs",
+      "ashby_list_upcoming_interviews",
       "ashby_move_application_stage",
       "ashby_search_candidates",
     ]);
@@ -769,6 +770,151 @@ describe("createServer", () => {
       expect(data.jobs[0].stages[0].count).toBe(2);
       // Verify it fetched both pages
       expect(mockRequestList).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe("ashby_list_upcoming_interviews", () => {
+    it("returns scheduled interviews with resolved candidate/job details", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "sched-1",
+            status: "Scheduled",
+            applicationId: "app-1",
+            interviewStageId: "stage-1",
+            interviewEvents: [
+              {
+                id: "evt-1",
+                startTime: "2099-06-15T10:00:00Z",
+                endTime: "2099-06-15T11:00:00Z",
+                interviewers: [
+                  { firstName: "Dewi", lastName: "Erwan", email: "dewi@co.com" },
+                ],
+                meetingLink: "https://meet.google.com/abc",
+                location: "Google Meet",
+                hasSubmittedFeedback: false,
+              },
+            ],
+          },
+          {
+            id: "sched-2",
+            status: "Complete",
+            applicationId: "app-2",
+            interviewStageId: "stage-1",
+            interviewEvents: [
+              { id: "evt-2", startTime: "2020-01-01T10:00:00Z", endTime: "2020-01-01T11:00:00Z", interviewers: [], hasSubmittedFeedback: true },
+            ],
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      // Resolve application for sched-1
+      mockRequest.mockResolvedValueOnce({
+        id: "app-1",
+        candidate: { id: "c1", name: "Alice" },
+        job: { id: "j1", title: "Engineer" },
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_upcoming_interviews",
+        arguments: {},
+      });
+      const data = getJson(result) as {
+        items: {
+          schedule_id: string;
+          candidate_name: string;
+          job_title: string;
+          events: { start_time: string; interviewers: string[] }[];
+        }[];
+      };
+
+      // Only sched-1 matches (Scheduled status, future date). sched-2 is Complete.
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].schedule_id).toBe("sched-1");
+      expect(data.items[0].candidate_name).toBe("Alice");
+      expect(data.items[0].job_title).toBe("Engineer");
+      expect(data.items[0].events).toHaveLength(1);
+      expect(data.items[0].events[0].interviewers[0]).toBe("Dewi Erwan (dewi@co.com)");
+    });
+
+    it("includes NeedsScheduling even without events", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "sched-ns",
+            status: "NeedsScheduling",
+            applicationId: "app-1",
+            interviewStageId: "stage-1",
+            interviewEvents: [],
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      mockRequest.mockResolvedValueOnce({
+        id: "app-1",
+        candidate: { id: "c1", name: "Bob" },
+        job: { id: "j1", title: "Designer" },
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_upcoming_interviews",
+        arguments: { status: "NeedsScheduling" },
+      });
+      const data = getJson(result) as { items: { schedule_id: string; candidate_name: string; events: unknown[] }[] };
+
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].candidate_name).toBe("Bob");
+      expect(data.items[0].events).toHaveLength(0);
+    });
+
+    it("filters by date range", async () => {
+      mockRequestList.mockResolvedValueOnce({
+        results: [
+          {
+            id: "sched-1",
+            status: "Scheduled",
+            applicationId: "app-1",
+            interviewStageId: "stage-1",
+            interviewEvents: [
+              { id: "e1", startTime: "2099-06-10T10:00:00Z", endTime: "2099-06-10T11:00:00Z", interviewers: [], hasSubmittedFeedback: false },
+            ],
+          },
+          {
+            id: "sched-2",
+            status: "Scheduled",
+            applicationId: "app-2",
+            interviewStageId: "stage-1",
+            interviewEvents: [
+              { id: "e2", startTime: "2099-07-10T10:00:00Z", endTime: "2099-07-10T11:00:00Z", interviewers: [], hasSubmittedFeedback: false },
+            ],
+          },
+        ],
+        moreDataAvailable: false,
+      });
+
+      mockRequest.mockResolvedValueOnce({
+        id: "app-1",
+        candidate: { id: "c1", name: "Alice" },
+        job: { id: "j1", title: "Engineer" },
+      });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_list_upcoming_interviews",
+        arguments: {
+          start_after: "2099-06-01T00:00:00Z",
+          start_before: "2099-06-30T00:00:00Z",
+        },
+      });
+      const data = getJson(result) as { items: { schedule_id: string }[] };
+
+      // Only sched-1 is in June; sched-2 is July
+      expect(data.items).toHaveLength(1);
+      expect(data.items[0].schedule_id).toBe("sched-1");
     });
   });
 
