@@ -18,17 +18,25 @@ This server exposes Ashby's recruiting data through the [Model Context Protocol]
 
 ### 2. Install
 
-#### Option A: npx (recommended — no clone needed)
+#### Option A: Claude Desktop Extension (easiest)
+
+1. Download [`ashby-mcp.mcpb`](https://github.com/dewierwan/ashby-mcp/releases/latest/download/ashby-mcp.mcpb)
+2. Double-click the file — Claude Desktop will open an install dialog
+3. Paste your Ashby API key and click Install
+
+No terminal or config files needed.
+
+#### Option B: npx (for Claude Code or other MCP clients)
 
 Just add the config below and it works immediately.
 
-#### Option B: Docker
+#### Option C: Docker
 
 ```bash
 docker build -t ashby-mcp .
 ```
 
-#### Option C: From source
+#### Option D: From source
 
 ```bash
 git clone https://github.com/dewierwan/ashby-mcp.git && cd ashby-mcp
