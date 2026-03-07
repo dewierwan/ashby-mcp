@@ -1,7 +1,7 @@
 {
   "manifest_version": "0.3",
   "name": "ashby-mcp",
-  "display_name": "Ashby ATS",
+  "display_name": "Ashby",
   "version": "1.5.0",
   "description": "Access your Ashby recruiting data — list jobs, review candidates, read resumes, manage applications, and track your hiring pipeline.",
   "author": {
