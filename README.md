@@ -22,7 +22,13 @@ This server exposes Ashby's recruiting data through the [Model Context Protocol]
 
 Just add the config below and it works immediately.
 
-#### Option B: From source
+#### Option B: Docker
+
+```bash
+docker build -t ashby-mcp .
+```
+
+#### Option C: From source
 
 ```bash
 git clone https://github.com/dewierwan/ashby-mcp.git && cd ashby-mcp
@@ -68,36 +74,219 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 }
 ```
 
+#### Docker
+
+```json
+{
+  "mcpServers": {
+    "ashby": {
+      "command": "docker",
+      "args": ["run", "--rm", "-i", "-e", "ASHBY_API_KEY", "ashby-mcp"],
+      "env": {
+        "ASHBY_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
 ## Tools
 
-### Read tools
+All tools return dual-format responses: a human-readable summary followed by structured JSON.
 
-| Tool | Description |
-|------|-------------|
-| `ashby_list_jobs` | List open jobs with IDs, titles, department, location, status |
-| `ashby_get_job_details` | Full job details including interview plan stages |
-| `ashby_list_candidates_for_job` | List candidates/applications for a job with stage and status |
-| `ashby_get_candidate` | Comprehensive candidate profile with all applications |
-| `ashby_get_application_details` | Full application with stage history, feedback, evaluations |
-| `ashby_get_candidate_notes` | All notes on a candidate |
-| `ashby_search_candidates` | Search candidates by name or email |
-| `ashby_list_interview_stages` | List all interview stages (pipeline reference) |
-| `ashby_get_feedback` | Submitted feedback/scorecards for an application |
-| `ashby_get_resume` | Download and extract text from a candidate's resume (PDF, text) |
-| `ashby_list_applications` | List applications across all jobs with date, status, stage, and source filters |
-| `ashby_get_pipeline_summary` | Pipeline overview with candidate counts per stage, per job |
-| `ashby_list_archive_reasons` | List available archive/rejection reasons |
-| `ashby_list_email_templates` | List email templates for rejection emails |
+### Jobs
 
-### Write tools
+#### `ashby_list_jobs`
 
-| Tool | Description |
-|------|-------------|
-| `ashby_add_candidate_note` | Add an evaluation note to a candidate |
-| `ashby_move_application_stage` | Move an application to a different interview stage |
-| `ashby_add_candidate_tag` | Tag a candidate (e.g. "Strong Hire") |
-| `ashby_archive_application` | Archive an application with reason and optional rejection email |
-| `ashby_bulk_archive` | Archive multiple applications at once (max 25) |
+List open jobs with IDs, titles, department, location, and status.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `status` | `"Open" \| "Closed" \| "Archived" \| "Draft" \| "All"` | `"Open"` | Filter by job status |
+| `limit` | `number` (1-100) | `25` | Max results per page |
+| `cursor` | `string` | — | Pagination cursor from previous response |
+
+#### `ashby_get_job_details`
+
+Full job details including description and interview plan stages.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `job_id` | `string` | Yes | Job ID (UUID) |
+
+#### `ashby_get_pipeline_summary`
+
+Pipeline overview with candidate counts per stage, per job.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `job_id` | `string` | — | Summary for one job. Omit for all jobs. |
+| `status` | `"Open" \| "Closed" \| "All"` | `"Open"` | Which jobs to include |
+
+### Candidates
+
+#### `ashby_get_candidate`
+
+Comprehensive candidate profile with all applications resolved.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `candidate_id` | `string` | Yes | Candidate ID (UUID) |
+
+#### `ashby_get_candidate_notes`
+
+All notes on a candidate.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `candidate_id` | `string` | Yes | Candidate ID (UUID) |
+
+#### `ashby_search_candidates`
+
+Search candidates by name or email.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `query` | `string` | — | Candidate name to search for (required) |
+| `email` | `string` | — | Optional email (AND logic with name) |
+| `limit` | `number` (1-100) | `25` | Max results |
+
+#### `ashby_add_candidate_note`
+
+Add an evaluation note to a candidate. Visible to the hiring team.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `candidate_id` | `string` | Yes | Candidate ID (UUID) |
+| `note` | `string` | Yes | Note content (plain text) |
+
+#### `ashby_add_candidate_tag`
+
+Tag a candidate (e.g. "Strong Hire", "Needs Review").
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `candidate_id` | `string` | Yes | Candidate ID (UUID) |
+| `tag_id` | `string` | Yes | Tag ID (UUID) from Ashby admin settings |
+
+#### `ashby_get_resume`
+
+Download and extract text from a candidate's resume (PDF, text).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file_handle` | `string` | Yes | File handle from candidate's `fileHandles` array |
+| `file_name` | `string` | No | Original filename (helps determine format) |
+
+### Applications
+
+#### `ashby_list_candidates_for_job`
+
+List candidates/applications for a specific job with stage and status.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `job_id` | `string` | — | Job ID (UUID) (required) |
+| `limit` | `number` (1-100) | `25` | Max results per page |
+| `cursor` | `string` | — | Pagination cursor |
+
+#### `ashby_get_application_details`
+
+Full application with stage history, feedback, and criteria evaluations.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `application_id` | `string` | Yes | Application ID (UUID) |
+
+#### `ashby_get_application_form_submission`
+
+Candidate's submitted application form responses (screening questions, cover letter, etc).
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `application_id` | `string` | Yes | Application ID (UUID) |
+
+#### `ashby_list_applications`
+
+List applications across all jobs with date, status, stage, and source filters.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `created_after` | `string` (ISO datetime) | — | Only applications after this time |
+| `created_before` | `string` (ISO datetime) | — | Only applications before this time |
+| `job_id` | `string` | — | Filter to a specific job |
+| `status` | `"Active" \| "Archived" \| "Hired" \| "Lead" \| "All"` | `"All"` | Filter by status |
+| `stage_type` | `"Lead" \| "PreInterviewScreen" \| "Interview" \| "Offer" \| "All"` | — | Filter by stage type |
+| `stage_name` | `string` | — | Filter by exact stage name |
+| `source` | `string` | — | Filter by source (case-insensitive substring) |
+| `limit` | `number` (1-100) | `25` | Max results |
+| `cursor` | `string` | — | Pagination cursor |
+
+#### `ashby_archive_application`
+
+Archive an application with reason and optional rejection email.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `application_id` | `string` | — | Application ID (UUID) (required) |
+| `archive_reason_id` | `string` | — | Reason ID from `ashby_list_archive_reasons` |
+| `send_email` | `boolean` | `false` | Send rejection email (requires `email_template_id`) |
+| `email_template_id` | `string` | — | Template ID from `ashby_list_email_templates` |
+
+#### `ashby_bulk_archive`
+
+Archive multiple applications at once (max 25).
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `application_ids` | `string[]` (1-25) | — | Application IDs (required) |
+| `archive_reason_id` | `string` | — | Reason ID, applied to all |
+| `send_email` | `boolean` | `false` | Send rejection emails |
+| `email_template_id` | `string` | — | Template ID for rejection emails |
+
+### Interviews
+
+#### `ashby_list_interview_stages`
+
+List all interview stages across all interview plans. No parameters.
+
+#### `ashby_list_upcoming_interviews`
+
+List upcoming and pending interview schedules.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `start_after` | `string` (ISO datetime) | now | Only interviews after this time |
+| `start_before` | `string` (ISO datetime) | — | Only interviews before this time |
+| `status` | `"Scheduled" \| "NeedsScheduling" \| "Complete" \| "Cancelled" \| "All"` | `"All"` | Filter by status |
+| `limit` | `number` (1-100) | `25` | Max results |
+
+### Workflow
+
+#### `ashby_move_application_stage`
+
+Move an application to a different interview stage.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `application_id` | `string` | Yes | Application ID (UUID) |
+| `stage_id` | `string` | Yes | Target stage ID from `ashby_list_interview_stages` |
+
+#### `ashby_get_feedback`
+
+Submitted feedback/scorecards for an application.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `application_id` | `string` | Yes | Application ID (UUID) |
+
+#### `ashby_list_archive_reasons`
+
+List available archive/rejection reasons. No parameters.
+
+#### `ashby_list_email_templates`
+
+List email templates for rejection emails. No parameters.
 
 ## Example Prompts
 

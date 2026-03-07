@@ -37,8 +37,12 @@ async function setupClient() {
 }
 
 // Helper: extract parsed JSON from a callTool result
+// With dual response format, content[0] is the human-readable summary and content[1] is the JSON.
+// For error responses, content[0] is the only block.
 function getJson(result: Awaited<ReturnType<Client["callTool"]>>): unknown {
-  const text = (result as { content: { type: string; text: string }[] }).content[0]?.text;
+  const content = (result as { content: { type: string; text: string }[] }).content;
+  // Try the second block first (structured JSON), fall back to first
+  const text = content[1]?.text ?? content[0]?.text;
   return JSON.parse(text);
 }
 

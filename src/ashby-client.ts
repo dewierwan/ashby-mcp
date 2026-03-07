@@ -4,6 +4,7 @@ import type {
   AshbyErrorResponse,
 } from "./types.js";
 import { logger } from "./logger.js";
+import { validateApiKeyFormat } from "./enhance-error.js";
 
 const BASE_URL = "https://api.ashbyhq.com";
 const API_TIMEOUT_MS = 30_000;
@@ -18,8 +19,12 @@ export class AshbyClient {
     if (!apiKey) {
       throw new Error(
         "ASHBY_API_KEY environment variable is required. " +
-          "Get an API key from your Ashby admin settings."
+          "Get an API key from your Ashby admin settings → Integrations → API Keys."
       );
+    }
+    const validation = validateApiKeyFormat(apiKey);
+    if (!validation.valid) {
+      logger.warn("api key validation", { reason: validation.reason });
     }
     this.authHeader = `Basic ${Buffer.from(`${apiKey}:`).toString("base64")}`;
   }
