@@ -318,6 +318,12 @@ Show me the available archive reasons and rejection email templates.
 Bulk archive all candidates in Application Review for the closed Designer role.
 ```
 
+## Privacy
+
+- This server proxies requests to the [Ashby API](https://developers.ashbyhq.com/) using your own API key.
+- No data is stored, logged, or sent anywhere other than Ashby's API endpoints (`api.ashbyhq.com`).
+- Your API key is stored locally on your machine and is never transmitted to any third party.
+
 ## Testing
 
 ### Verify API connectivity

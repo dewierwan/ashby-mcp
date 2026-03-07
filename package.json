@@ -1,6 +1,6 @@
 {
   "name": "ashby-mcp",
-  "version": "1.4.1",
+  "version": "1.5.0",
   "description": "MCP server for Ashby ATS — candidate evaluation workflow",
   "type": "module",
   "main": "dist/index.js",
@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "manifest.json",
     "README.md"
   ],
   "repository": {

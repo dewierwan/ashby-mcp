@@ -17,6 +17,7 @@ Fetches all interview plans, then resolves stages for each.
 
 Response: plans[] (plan_id, plan_title, stages[] (id, title, type, order)).`,
     {},
+    { readOnlyHint: true },
     async () => {
       try {
         const planPage = await client.requestList<InterviewPlan>("interviewPlan.list", {});
@@ -87,6 +88,7 @@ Response: items[] (schedule_id, status, candidate_name, candidate_id, job_title,
         .default(25)
         .describe("Max results to return (1-100). Defaults to 25."),
     },
+    { readOnlyHint: true },
     async ({ start_after, start_before, status, limit }) => {
       try {
         const startAfterTime = start_after ?? new Date().toISOString();

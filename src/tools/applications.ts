@@ -37,6 +37,7 @@ Response: items[] (application_id, candidate_id, candidate_name, status, current
         .optional()
         .describe("Pagination cursor from a previous response."),
     },
+    { readOnlyHint: true },
     async ({ job_id, limit, cursor }) => {
       try {
         const params: Record<string, unknown> = { jobId: job_id, limit };
@@ -83,6 +84,7 @@ Response: application (id, status, candidate, job, current_stage, hiringTeam, so
     {
       application_id: z.string().describe("The application ID (UUID) to fetch."),
     },
+    { readOnlyHint: true },
     async ({ application_id }) => {
       try {
         const [appInfo, historyPage, criteriaPage, feedbackPage] = await Promise.all([
@@ -171,6 +173,7 @@ Response: application_id, candidate_name, job_title, form_responses[] (question,
     {
       application_id: z.string().describe("The application ID (UUID) to fetch form responses for."),
     },
+    { readOnlyHint: true },
     async ({ application_id }) => {
       try {
         const app = await client.request<{
@@ -307,6 +310,7 @@ Response: items[] (application_id, candidate_id, candidate_name, candidate_email
         .optional()
         .describe("Pagination cursor from a previous response."),
     },
+    { readOnlyHint: true },
     async ({ created_after, created_before, job_id, status, stage_type, stage_name, source, limit, cursor }) => {
       try {
         const needsClientFilter = !!(created_before || stage_type || stage_name || source);
@@ -417,6 +421,7 @@ Response: application_id, status, archive_reason_id, email_sent, message.`,
         .optional()
         .describe("Communication template ID from ashby_list_email_templates. Required when send_email is true."),
     },
+    { destructiveHint: true },
     async ({ application_id, archive_reason_id, send_email, email_template_id }) => {
       try {
         if (send_email && !email_template_id) {
@@ -507,6 +512,7 @@ Response: total, succeeded, failed, results[] (application_id, success, error?).
         .optional()
         .describe("Communication template ID from ashby_list_email_templates. Required when send_email is true."),
     },
+    { destructiveHint: true },
     async ({ application_ids, archive_reason_id, send_email, email_template_id }) => {
       try {
         if (send_email && !email_template_id) {

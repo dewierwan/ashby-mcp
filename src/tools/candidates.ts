@@ -21,6 +21,7 @@ Response: candidate (id, name, email, phone, socialLinks, tags, source, profileU
     {
       candidate_id: z.string().describe("The candidate ID (UUID) to fetch."),
     },
+    { readOnlyHint: true },
     async ({ candidate_id }) => {
       try {
         const candidate = await client.request<Candidate>("candidate.info", { id: candidate_id });
@@ -98,6 +99,7 @@ Response: notes[] (id, content, createdAt, author).`,
     {
       candidate_id: z.string().describe("The candidate ID (UUID) to fetch notes for."),
     },
+    { readOnlyHint: true },
     async ({ candidate_id }) => {
       try {
         const page = await client.requestList<CandidateNote>(
@@ -151,6 +153,7 @@ Response: candidates[] (id, name, email, phone).`,
         .default(25)
         .describe("Max results (1-100). Defaults to 25."),
     },
+    { readOnlyHint: true },
     async ({ query, email, limit }) => {
       try {
         const params: Record<string, unknown> = { name: query, limit };
@@ -197,6 +200,7 @@ Response: note_id, confirmation message.`,
       candidate_id: z.string().describe("The candidate ID (UUID) to add a note to."),
       note: z.string().describe("The note content (plain text). Visible to the hiring team."),
     },
+    { destructiveHint: false, idempotentHint: false },
     async ({ candidate_id, note }) => {
       try {
         const result = await client.request<{ id: string }>(
@@ -227,6 +231,7 @@ Response: confirmation message.`,
       candidate_id: z.string().describe("The candidate ID (UUID) to tag."),
       tag_id: z.string().describe("The tag ID (UUID). Tags are configured in Ashby admin settings."),
     },
+    { destructiveHint: false, idempotentHint: true },
     async ({ candidate_id, tag_id }) => {
       try {
         await client.request<unknown>("candidate.addTag", {
@@ -261,6 +266,7 @@ Response: filename, content (extracted text), or url (for unsupported formats).`
       file_handle: z.string().describe("The file handle string from a candidate's fileHandles array."),
       file_name: z.string().optional().describe("Original filename (helps determine format). Optional."),
     },
+    { readOnlyHint: true },
     async ({ file_handle, file_name }) => {
       try {
         // Get the download URL from Ashby

@@ -19,6 +19,7 @@ Response: updated application with new current_stage.`,
       application_id: z.string().describe("The application ID (UUID) to move."),
       stage_id: z.string().describe("The target interview stage ID (UUID). Get from ashby_list_interview_stages."),
     },
+    { destructiveHint: true },
     async ({ application_id, stage_id }) => {
       try {
         const result = await client.request<Application>(
@@ -60,6 +61,7 @@ Response: feedback[] (form definition with sections/fields, submitted values).`,
     {
       application_id: z.string().describe("The application ID (UUID) to fetch feedback for."),
     },
+    { readOnlyHint: true },
     async ({ application_id }) => {
       try {
         const page = await client.requestList<ApplicationFeedback>(
@@ -92,6 +94,7 @@ Requires the "hiringProcessMetadataRead" API key permission.
 
 Response: reasons[] (id, text, reasonType).`,
     {},
+    { readOnlyHint: true },
     async () => {
       try {
         const page = await client.requestList<ArchiveReason>("archiveReason.list", {});
@@ -125,6 +128,7 @@ Requires the "hiringProcessMetadataRead" API key permission.
 
 Response: templates[] (id, name, and any other fields returned by the API).`,
     {},
+    { readOnlyHint: true },
     async () => {
       try {
         const page = await client.requestList<CommunicationTemplate>("communicationTemplate.list", {});

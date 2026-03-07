@@ -32,6 +32,7 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
         .optional()
         .describe("Pagination cursor from a previous response."),
     },
+    { readOnlyHint: true },
     async ({ status, limit, cursor }) => {
       try {
         const params: Record<string, unknown> = { limit };
@@ -75,6 +76,7 @@ Response: job (id, title, status, description, hiringTeam, customFields, locatio
     {
       job_id: z.string().describe("The job ID (UUID) to fetch details for."),
     },
+    { readOnlyHint: true },
     async ({ job_id }) => {
       try {
         const job = await client.request<Job>("job.info", { id: job_id });
@@ -166,6 +168,7 @@ Response: jobs[] (job_id, job_title, total_active, total_archived, stages[] (sta
         .default("Open")
         .describe("Which jobs to include. Defaults to Open."),
     },
+    { readOnlyHint: true },
     async ({ job_id, status }) => {
       try {
         // Determine which jobs to summarize

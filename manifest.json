@@ -1,0 +1,64 @@
+{
+  "manifest_version": "0.3",
+  "name": "ashby-mcp",
+  "display_name": "Ashby ATS",
+  "version": "1.5.0",
+  "description": "Access your Ashby recruiting data — list jobs, review candidates, read resumes, manage applications, and track your hiring pipeline.",
+  "author": {
+    "name": "Dewi Erwan",
+    "url": "https://github.com/dewierwan"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dewierwan/ashby-mcp"
+  },
+  "icon": "icon.png",
+  "license": "MIT",
+  "server": {
+    "type": "node",
+    "entry_point": "dist/index.js",
+    "mcp_config": {
+      "command": "node",
+      "args": ["${__dirname}/dist/index.js"],
+      "env": {
+        "ASHBY_API_KEY": "${user_config.ashby_api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "ashby_api_key": {
+      "type": "string",
+      "title": "Ashby API Key",
+      "description": "Your Ashby API key. Create one in Ashby Admin > Integrations > API Keys with candidatesRead, jobsRead, interviewsRead, candidatesWrite, and hiringProcessMetadataRead permissions.",
+      "required": true,
+      "sensitive": true
+    }
+  },
+  "tools": [
+    { "name": "ashby_list_jobs", "description": "List jobs with IDs, titles, department, location, and status." },
+    { "name": "ashby_get_job_details", "description": "Get full details for a specific job including description and interview stages." },
+    { "name": "ashby_get_pipeline_summary", "description": "Pipeline overview with candidate counts per interview stage, per job." },
+    { "name": "ashby_get_candidate", "description": "Get a comprehensive candidate profile with all applications." },
+    { "name": "ashby_get_candidate_notes", "description": "List all notes on a candidate." },
+    { "name": "ashby_search_candidates", "description": "Search for candidates by name or email." },
+    { "name": "ashby_add_candidate_note", "description": "Add an evaluation note to a candidate, visible to the hiring team." },
+    { "name": "ashby_add_candidate_tag", "description": "Tag a candidate with a label." },
+    { "name": "ashby_get_resume", "description": "Download and extract text from a candidate's resume." },
+    { "name": "ashby_list_candidates_for_job", "description": "List all candidates/applications for a specific job." },
+    { "name": "ashby_get_application_details", "description": "Get full application details including stage history, feedback, and evaluations." },
+    { "name": "ashby_get_application_form_submission", "description": "Get a candidate's submitted application form responses." },
+    { "name": "ashby_list_applications", "description": "List applications across all jobs with date, status, stage, and source filters." },
+    { "name": "ashby_archive_application", "description": "Archive an application with an optional reason and rejection email." },
+    { "name": "ashby_bulk_archive", "description": "Archive multiple applications at once (max 25)." },
+    { "name": "ashby_list_interview_stages", "description": "List all interview stages across all interview plans." },
+    { "name": "ashby_list_upcoming_interviews", "description": "List upcoming and pending interview schedules." },
+    { "name": "ashby_move_application_stage", "description": "Move an application to a different interview stage." },
+    { "name": "ashby_get_feedback", "description": "Get submitted feedback/scorecards for an application." },
+    { "name": "ashby_list_archive_reasons", "description": "List available archive/rejection reasons." },
+    { "name": "ashby_list_email_templates", "description": "List available email templates for rejection emails." }
+  ],
+  "keywords": ["ashby", "ats", "recruiting", "hiring", "applicant-tracking"],
+  "privacy_policies": [
+    "https://github.com/dewierwan/ashby-mcp#privacy"
+  ]
+}
