@@ -4,9 +4,9 @@ MCP server for [Ashby](https://www.ashbyhq.com/) ATS — designed for candidate 
 
 This server exposes Ashby's recruiting data through the [Model Context Protocol](https://modelcontextprotocol.io/), letting AI agents review candidates, read application details, and write evaluation notes.
 
-## Setup
+## Prerequisites
 
-### 1. Get an Ashby API Key
+You need an Ashby API key:
 
 1. Go to your Ashby admin settings → Integrations → API Keys
 2. Create a new API key with these permissions:
@@ -16,73 +16,49 @@ This server exposes Ashby's recruiting data through the [Model Context Protocol]
    - `candidatesWrite` — add notes, tags, move application stages, archive applications
    - `hiringProcessMetadataRead` — list archive reasons and email templates
 
-### 2. Install
+## Install
 
-#### Option A: Claude Desktop Extension (easiest)
+### Claude Desktop (easiest)
 
 1. Download [`ashby-mcp.mcpb`](https://github.com/dewierwan/ashby-mcp/releases/latest/download/ashby-mcp.mcpb)
 2. Double-click the file — Claude Desktop will open an install dialog
 3. Paste your Ashby API key and click Install
 
-No terminal or config files needed.
+That's it. No terminal, no config files.
 
-#### Option B: npx (for Claude Code or other MCP clients)
+### Claude Code
 
-Just add the config below and it works immediately.
+Run in your terminal:
 
-#### Option C: Docker
+```bash
+claude mcp add ashby -e ASHBY_API_KEY=your-api-key-here -- npx -y ashby-mcp
+```
+
+### Other MCP clients
+
+Add this to your client's MCP server configuration:
+
+```json
+{
+  "mcpServers": {
+    "ashby": {
+      "command": "npx",
+      "args": ["-y", "ashby-mcp"],
+      "env": {
+        "ASHBY_API_KEY": "your-api-key-here"
+      }
+    }
+  }
+}
+```
+
+### Docker
+
+Build the image, then add it to your MCP client config:
 
 ```bash
 docker build -t ashby-mcp .
 ```
-
-#### Option D: From source
-
-```bash
-git clone https://github.com/dewierwan/ashby-mcp.git && cd ashby-mcp
-npm install
-npm run build
-```
-
-### 3. Configure
-
-#### Claude Code
-
-Add to `~/.mcp.json`:
-
-```json
-{
-  "mcpServers": {
-    "ashby": {
-      "command": "npx",
-      "args": ["-y", "ashby-mcp"],
-      "env": {
-        "ASHBY_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-#### Claude Desktop
-
-Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
-
-```json
-{
-  "mcpServers": {
-    "ashby": {
-      "command": "npx",
-      "args": ["-y", "ashby-mcp"],
-      "env": {
-        "ASHBY_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-#### Docker
 
 ```json
 {
@@ -97,6 +73,16 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
   }
 }
 ```
+
+### From source
+
+```bash
+git clone https://github.com/dewierwan/ashby-mcp.git && cd ashby-mcp
+npm install
+npm run build
+```
+
+Then point your MCP client at `node dist/index.js` with the `ASHBY_API_KEY` environment variable set.
 
 ## Tools
 
