@@ -72,6 +72,31 @@ export function enhanceError(err: AshbyApiError): string {
     );
   }
 
+  // Ashby application-level error codes (returned as HTTP 200 with success: false)
+  if (err.code === "invalid_input") {
+    return (
+      `${base}\n\n` +
+      `The input was invalid. Common causes:\n` +
+      `- The ID is not a valid UUID (Ashby IDs look like "a1b2c3d4-e5f6-...")\n` +
+      `- A required field is missing or has the wrong type\n` +
+      `- The value is out of the allowed range`
+    );
+  }
+
+  if (err.code === "not_found") {
+    return (
+      `${base}\n\n` +
+      `The resource was not found. It may have been deleted, or the ID is wrong.`
+    );
+  }
+
+  if (err.code === "unauthorized" || err.code === "forbidden") {
+    return (
+      `${base}\n\n` +
+      `Permission denied. Check your API key permissions at: Ashby Admin > Integrations > API Keys`
+    );
+  }
+
   return base;
 }
 
