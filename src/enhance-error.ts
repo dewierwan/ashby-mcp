@@ -9,6 +9,8 @@ const PERMISSION_MAP: Record<string, string> = {
   "candidate.listNotes": "candidatesRead",
   "candidate.createNote": "candidatesWrite",
   "candidate.addTag": "candidatesWrite",
+  "candidate.create": "candidatesWrite",
+  "application.create": "candidatesWrite",
   "application.info": "candidatesRead",
   "application.list": "candidatesRead",
   "application.listHistory": "candidatesRead",

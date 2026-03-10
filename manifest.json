@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "ashby-mcp",
   "display_name": "Ashby",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Access your Ashby recruiting data — list jobs, review candidates, read resumes, manage applications, and track your hiring pipeline.",
   "author": {
     "name": "Dewi Erwan",
@@ -43,6 +43,7 @@
     { "name": "ashby_search_candidates", "description": "Search for candidates by name or email." },
     { "name": "ashby_add_candidate_note", "description": "Add an evaluation note to a candidate, visible to the hiring team." },
     { "name": "ashby_add_candidate_tag", "description": "Tag a candidate with a label." },
+    { "name": "ashby_add_lead", "description": "Create a new candidate and add them as a lead on a job." },
     { "name": "ashby_get_resume", "description": "Download and extract text from a candidate's resume." },
     { "name": "ashby_list_candidates_for_job", "description": "List all candidates/applications for a specific job." },
     { "name": "ashby_get_application_details", "description": "Get full application details including stage history, feedback, and evaluations." },
