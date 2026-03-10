@@ -31,7 +31,7 @@ That's it. No terminal, no config files.
 Run in your terminal:
 
 ```bash
-claude mcp add ashby -e ASHBY_API_KEY=your-api-key-here -- npx -y ashby-mcp
+claude mcp add ashby -e ASHBY_API_KEY=your-api-key-here -- npx -y ashby-mcp@latest
 ```
 
 ### Other MCP clients
@@ -43,7 +43,7 @@ Add this to your client's MCP server configuration:
   "mcpServers": {
     "ashby": {
       "command": "npx",
-      "args": ["-y", "ashby-mcp"],
+      "args": ["-y", "ashby-mcp@latest"],
       "env": {
         "ASHBY_API_KEY": "your-api-key-here"
       }
