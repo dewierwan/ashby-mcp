@@ -249,6 +249,69 @@ Response: confirmation message.`,
     }
   );
 
+  // ── ashby_add_lead ──────────────────────────────────────────────────
+
+  server.tool(
+    "ashby_add_lead",
+    `Create a new candidate and add them as a lead on a job.
+
+Use this to source candidates (e.g. from LinkedIn) directly into Ashby. Creates the candidate,
+adds a Lead application on the specified job, and optionally attaches a note with sourcing context.
+
+Response: candidate_id, application_id, note_id (if note provided), confirmation message.`,
+    {
+      name: z.string().describe("Full name of the candidate."),
+      job_id: z.string().describe("Job UUID to add the candidate as a lead on."),
+      linkedin_url: z.string().optional().describe("LinkedIn profile URL."),
+      email: z.string().optional().describe("Email address."),
+      phone: z.string().optional().describe("Phone number."),
+      note: z.string().optional().describe("Note to attach (e.g. sourcing context). Visible to the hiring team."),
+    },
+    { destructiveHint: false, idempotentHint: false },
+    async ({ name, job_id, linkedin_url, email, phone, note }) => {
+      try {
+        // 1. Create candidate
+        const candidateParams: Record<string, unknown> = { name };
+        if (email) candidateParams.primaryEmailAddress = email;
+        if (phone) candidateParams.primaryPhoneNumber = phone;
+        if (linkedin_url) candidateParams.linkedInUrl = linkedin_url;
+
+        const candidate = await client.request<{ id: string }>(
+          "candidate.create",
+          candidateParams
+        );
+
+        // 2. Create lead application on job
+        const application = await client.request<{ id: string }>(
+          "application.create",
+          { candidateId: candidate.id, jobId: job_id }
+        );
+
+        // 3. Optionally add a note
+        let noteId: string | undefined;
+        if (note) {
+          const noteResult = await client.request<{ id: string }>(
+            "candidate.createNote",
+            { candidateId: candidate.id, note }
+          );
+          noteId = noteResult.id;
+        }
+
+        return json(
+          `Created candidate "${name}" and added as lead on job ${job_id}.`,
+          {
+            candidate_id: candidate.id,
+            application_id: application.id,
+            ...(noteId ? { note_id: noteId } : {}),
+            message: `Created candidate "${name}" and added as lead on job ${job_id}.`,
+          }
+        );
+      } catch (e) {
+        return error(e);
+      }
+    }
+  );
+
   // ── ashby_get_resume ─────────────────────────────────────────────────
 
   server.tool(
