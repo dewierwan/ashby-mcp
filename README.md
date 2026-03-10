@@ -18,15 +18,7 @@ You need an Ashby API key:
 
 ## Install
 
-### Claude Desktop (easiest)
-
-1. Download [`ashby-mcp.mcpb`](https://github.com/dewierwan/ashby-mcp/releases/latest/download/ashby-mcp.mcpb)
-2. Double-click the file — Claude Desktop will open an install dialog
-3. Paste your Ashby API key and click Install
-
-That's it. No terminal, no config files.
-
-### Claude Code
+### Claude Code (recommended)
 
 Run in your terminal:
 
@@ -34,9 +26,11 @@ Run in your terminal:
 claude mcp add ashby -e ASHBY_API_KEY=your-api-key-here -- npx -y ashby-mcp@latest
 ```
 
-### Other MCP clients
+This auto-updates whenever a new version is published.
 
-Add this to your client's MCP server configuration:
+### Claude Desktop
+
+Add this to your Claude Desktop MCP config (`Settings → Developer → Edit Config`):
 
 ```json
 {
@@ -51,6 +45,14 @@ Add this to your client's MCP server configuration:
   }
 }
 ```
+
+This also auto-updates on each restart.
+
+> **Alternative:** You can download the [`.mcpb` bundle](https://github.com/dewierwan/ashby-mcp/releases/latest/download/ashby-mcp.mcpb) and double-click to install — no terminal needed. Note that this method pins you to a specific version and won't auto-update. You'll need to re-download after each release.
+
+### Other MCP clients
+
+Add the same JSON config above to your client's MCP server configuration.
 
 ### Docker
 
