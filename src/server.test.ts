@@ -62,11 +62,12 @@ describe("createServer", () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(21);
+    expect(tools).toHaveLength(22);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
       "ashby_add_candidate_tag",
+      "ashby_add_lead",
       "ashby_archive_application",
       "ashby_bulk_archive",
       "ashby_get_application_details",
