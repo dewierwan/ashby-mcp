@@ -36,14 +36,12 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
     async ({ status, limit, cursor }) => {
       try {
         const params: Record<string, unknown> = { limit };
+        if (status !== "All") params.status = status;
         if (cursor) params.cursor = cursor;
 
         const page = await client.requestList<Job>("job.list", params);
-        const filtered = status === "All"
-          ? page.results
-          : page.results.filter((j) => j.status === status);
 
-        const items = filtered.map((j) => ({
+        const items = page.results.map((j) => ({
           id: j.id,
           title: j.title,
           status: j.status,
@@ -177,11 +175,19 @@ Response: jobs[] (job_id, job_title, total_active, total_archived, stages[] (sta
           const job = await client.request<{ id: string; title: string }>("job.info", { id: job_id });
           jobIds = [{ id: job.id, title: job.title }];
         } else {
-          const jobPage = await client.requestList<Job>("job.list", { limit: 100 });
-          const filtered = status === "All"
-            ? jobPage.results
-            : jobPage.results.filter((j) => j.status === status);
-          jobIds = filtered.map((j) => ({ id: j.id, title: j.title }));
+          const allJobs: Job[] = [];
+          const jobParams: Record<string, unknown> = { limit: 100 };
+          if (status !== "All") jobParams.status = status;
+
+          let jobCursor: string | undefined;
+          do {
+            if (jobCursor) jobParams.cursor = jobCursor;
+            const page = await client.requestList<Job>("job.list", jobParams);
+            allJobs.push(...page.results);
+            jobCursor = page.moreDataAvailable ? page.nextCursor : undefined;
+          } while (jobCursor);
+
+          jobIds = allJobs.map((j) => ({ id: j.id, title: j.title }));
         }
 
         let totalActive = 0;

@@ -126,10 +126,9 @@ describe("createServer", () => {
       expect(data.next_cursor).toBeNull();
     });
 
-    it("filters by status client-side", async () => {
+    it("passes status filter to the API server-side", async () => {
       mockRequestList.mockResolvedValueOnce({
         results: [
-          { id: "j1", title: "Open Job", status: "Open", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
           { id: "j2", title: "Closed Job", status: "Closed", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
         ],
         moreDataAvailable: false,
@@ -144,11 +143,10 @@ describe("createServer", () => {
 
       expect(data.items).toHaveLength(1);
       expect(data.items[0].id).toBe("j2");
-      // Status should NOT be passed to the API
-      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25 });
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25, status: "Closed" });
     });
 
-    it("returns all jobs when status is All", async () => {
+    it("omits status param when status is All", async () => {
       mockRequestList.mockResolvedValueOnce({
         results: [
           { id: "j1", title: "Open", status: "Open", createdAt: "2024-01-01", updatedAt: "2024-01-02" },
@@ -165,6 +163,7 @@ describe("createServer", () => {
       const data = getJson(result) as { items: { id: string }[] };
 
       expect(data.items).toHaveLength(2);
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25 });
     });
 
     it("returns error ToolResult on API failure", async () => {
