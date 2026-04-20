@@ -3,6 +3,7 @@ import { z } from "zod";
 import type { AshbyClient } from "../ashby-client.js";
 import type { Application, Candidate, CandidateNote } from "../types.js";
 import { extractPdfText } from "../pdf.js";
+import { extractDocxText } from "../docx.js";
 import { error, json } from "../tool-helpers.js";
 import { logger } from "../logger.js";
 
@@ -378,6 +379,30 @@ Response: filename, content (extracted text), or url (for unsupported formats).`
               filename: name,
               format: "pdf",
               content: "(Could not extract text — PDF may be scanned/image-only. Use the URL to view it directly.)",
+              url,
+            }
+          );
+        }
+
+        // For DOCX, unzip word/document.xml and strip XML
+        if (
+          contentType.includes("officedocument.wordprocessingml") ||
+          contentType.includes("msword") ||
+          ext === "docx"
+        ) {
+          const buffer = Buffer.from(await response.arrayBuffer());
+          const text = extractDocxText(buffer);
+
+          if (text.length > 0) {
+            return json(`Extracted text from DOCX ${name}.`, { filename: name, format: "docx", content: text });
+          }
+
+          return json(
+            `Could not extract text from DOCX ${name}.`,
+            {
+              filename: name,
+              format: "docx",
+              content: "(Could not extract text. Use the URL to view it directly.)",
               url,
             }
           );
