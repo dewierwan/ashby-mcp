@@ -6,6 +6,7 @@ import { AshbyApiError } from "./ashby-client.js";
 // Mock the AshbyClient module before any imports that use it
 const mockRequest = vi.fn();
 const mockRequestList = vi.fn();
+const mockRawRequest = vi.fn();
 
 vi.mock("./ashby-client.js", async (importOriginal) => {
   const orig = await importOriginal<typeof import("./ashby-client.js")>();
@@ -14,6 +15,7 @@ vi.mock("./ashby-client.js", async (importOriginal) => {
     AshbyClient: vi.fn().mockImplementation(() => ({
       request: mockRequest,
       requestList: mockRequestList,
+      rawRequest: mockRawRequest,
     })),
   };
 });
@@ -51,6 +53,7 @@ describe("createServer", () => {
     process.env.ASHBY_API_KEY = "test-key";
     mockRequest.mockReset();
     mockRequestList.mockReset();
+    mockRawRequest.mockReset();
     mockFetch.mockReset();
   });
 
@@ -58,11 +61,11 @@ describe("createServer", () => {
     delete process.env.ASHBY_API_KEY;
   });
 
-  it("registers all 21 tools", async () => {
+  it("registers all tools", async () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(22);
+    expect(tools).toHaveLength(24);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
@@ -70,6 +73,8 @@ describe("createServer", () => {
       "ashby_add_lead",
       "ashby_archive_application",
       "ashby_bulk_archive",
+      "ashby_call_api",
+      "ashby_get_api_docs",
       "ashby_get_application_details",
       "ashby_get_application_form_submission",
       "ashby_get_candidate",
@@ -1333,6 +1338,100 @@ describe("createServer", () => {
       const text = (result as { content: { type: string; text: string }[] }).content[0].text;
       expect(text).toContain("Error:");
       expect(text).toContain("Network timeout");
+    });
+  });
+
+  describe("ashby_call_api", () => {
+    it("posts to the endpoint with given params and returns the raw body", async () => {
+      const rawBody = {
+        success: true,
+        results: [{ id: "offer-1", status: "Accepted" }],
+        moreDataAvailable: true,
+        nextCursor: "cursor-xyz",
+      };
+      mockRawRequest.mockResolvedValueOnce(rawBody);
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_call_api",
+        arguments: { endpoint: "offer.list", params: { limit: 1 } },
+      });
+
+      expect(mockRawRequest).toHaveBeenCalledWith("offer.list", { limit: 1 });
+
+      const content = (result as { content: { type: string; text: string }[] }).content;
+      expect(content[0].text).toContain("offer.list");
+      expect(content[0].text).toContain("1 result(s)");
+      expect(content[0].text).toContain("more available");
+
+      const body = JSON.parse(content[1].text);
+      expect(body).toEqual(rawBody);
+    });
+
+    it("defaults params to {} when omitted", async () => {
+      mockRawRequest.mockResolvedValueOnce({ success: true, results: {} });
+
+      const client = await setupClient();
+      await client.callTool({
+        name: "ashby_call_api",
+        arguments: { endpoint: "user.list" },
+      });
+
+      expect(mockRawRequest).toHaveBeenCalledWith("user.list", {});
+    });
+
+    it("surfaces success:false bodies without throwing", async () => {
+      const errorBody = {
+        success: false,
+        errors: ["resource_not_found"],
+        errorInfo: { code: "not_found", message: "Candidate not found" },
+      };
+      mockRawRequest.mockResolvedValueOnce(errorBody);
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_call_api",
+        arguments: { endpoint: "candidate.info", params: { id: "bad-id" } },
+      });
+
+      const content = (result as { content: { type: string; text: string }[] }).content;
+      expect(content[0].text).toContain("success: false");
+      expect(content[0].text).toContain("Candidate not found");
+
+      const body = JSON.parse(content[1].text);
+      expect(body).toEqual(errorBody);
+    });
+
+    it("returns error ToolResult when the client throws", async () => {
+      mockRawRequest.mockRejectedValueOnce(new AshbyApiError("HTTP 400: Bad Request", 400));
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_call_api",
+        arguments: { endpoint: "bogus.endpoint", params: {} },
+      });
+
+      const text = (result as { content: { type: string; text: string }[] }).content[0].text;
+      expect(text).toContain("Ashby API error");
+    });
+  });
+
+  describe("ashby_get_api_docs", () => {
+    it("returns a markdown reference covering base URL, envelope, and endpoints", async () => {
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_get_api_docs",
+        arguments: {},
+      });
+
+      const text = (result as { content: { type: string; text: string }[] }).content[0].text;
+      expect(text).toContain("https://api.ashbyhq.com");
+      expect(text).toContain("developers.ashbyhq.com/reference/");
+      expect(text).toContain("job.list");
+      expect(text).toContain("candidate.info");
+      expect(text).toContain("offer.list");
+      expect(text).toContain("moreDataAvailable");
+      expect(text).toContain("Common gotchas");
     });
   });
 });

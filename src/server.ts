@@ -6,6 +6,7 @@ import { registerCandidateTools } from "./tools/candidates.js";
 import { registerApplicationTools } from "./tools/applications.js";
 import { registerInterviewTools } from "./tools/interviews.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
+import { registerEscapeHatchTools } from "./tools/escape-hatch.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -31,6 +32,7 @@ export function createServer(): McpServer {
   registerApplicationTools(server, client);
   registerInterviewTools(server, client);
   registerWorkflowTools(server, client);
+  registerEscapeHatchTools(server, client);
 
   return server;
 }

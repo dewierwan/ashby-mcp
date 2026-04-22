@@ -141,6 +141,20 @@ export class AshbyClient {
       nextCursor: ok.nextCursor,
     };
   }
+
+  /**
+   * Post to any Ashby endpoint and return the raw JSON body without
+   * unwrapping `results` or throwing on `success: false`. Used by the
+   * generic call_api escape hatch so Claude can see everything the API
+   * returned (pagination metadata, error codes, extra fields).
+   */
+  async rawRequest(
+    endpoint: string,
+    params?: Record<string, unknown>
+  ): Promise<unknown> {
+    const response = await this.post(endpoint, params);
+    return response.json();
+  }
 }
 
 export class AshbyApiError extends Error {

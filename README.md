@@ -284,6 +284,27 @@ List available archive/rejection reasons. No parameters.
 
 List email templates for rejection emails. No parameters.
 
+### Escape hatch
+
+For anything the dedicated tools above don't cover (e.g. `offer.list`, `user.list`, `department.list`, `interviewPlan.list`, `candidate.update`), use the two generic tools below. They share the same auth, retries, and timeouts as every other tool.
+
+#### `ashby_call_api`
+
+Call any Ashby API endpoint directly. Returns the raw response envelope, including `success`, `results`, `moreDataAvailable`, and error details.
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `endpoint` | `string` | Yes | Endpoint path, e.g. `"offer.list"`, `"user.list"`, `"candidate.update"`. No leading slash. |
+| `params` | `object` | No | JSON body to POST. Defaults to `{}`. |
+
+Marked `destructiveHint: true` so Claude surfaces the call before running it (a generic passthrough can hit write endpoints).
+
+#### `ashby_get_api_docs`
+
+Return a curated reference for the Ashby API: base URL, auth, response envelope, pagination, endpoint index grouped by resource, and common gotchas. No parameters.
+
+Call this before `ashby_call_api` if you're not sure which endpoint or parameter names to use. Full official reference: <https://developers.ashbyhq.com/reference/>.
+
 ## Example Prompts
 
 ```

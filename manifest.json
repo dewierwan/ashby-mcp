@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "ashby-mcp",
   "display_name": "Ashby",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "description": "Access your Ashby recruiting data — list jobs, review candidates, read resumes, manage applications, and track your hiring pipeline.",
   "author": {
     "name": "Dewi Erwan",
@@ -56,7 +56,9 @@
     { "name": "ashby_move_application_stage", "description": "Move an application to a different interview stage." },
     { "name": "ashby_get_feedback", "description": "Get submitted feedback/scorecards for an application." },
     { "name": "ashby_list_archive_reasons", "description": "List available archive/rejection reasons." },
-    { "name": "ashby_list_email_templates", "description": "List available email templates for rejection emails." }
+    { "name": "ashby_list_email_templates", "description": "List available email templates for rejection emails." },
+    { "name": "ashby_call_api", "description": "Escape hatch — call any Ashby API endpoint directly with a custom JSON body." },
+    { "name": "ashby_get_api_docs", "description": "Reference for the Ashby API: base URL, auth, endpoint index, and common gotchas." }
   ],
   "keywords": ["ashby", "ats", "recruiting", "hiring", "applicant-tracking"],
   "privacy_policies": [
