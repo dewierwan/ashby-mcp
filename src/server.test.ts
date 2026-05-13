@@ -148,7 +148,7 @@ describe("createServer", () => {
 
       expect(data.items).toHaveLength(1);
       expect(data.items[0].id).toBe("j2");
-      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25, status: "Closed" });
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", { limit: 25, status: ["Closed"] });
     });
 
     it("omits status param when status is All", async () => {

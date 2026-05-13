@@ -36,7 +36,7 @@ Response: items[] (id, title, status, locationId, departmentId), has_more, next_
     async ({ status, limit, cursor }) => {
       try {
         const params: Record<string, unknown> = { limit };
-        if (status !== "All") params.status = status;
+        if (status !== "All") params.status = [status];
         if (cursor) params.cursor = cursor;
 
         const page = await client.requestList<Job>("job.list", params);
@@ -177,7 +177,7 @@ Response: jobs[] (job_id, job_title, total_active, total_archived, stages[] (sta
         } else {
           const allJobs: Job[] = [];
           const jobParams: Record<string, unknown> = { limit: 100 };
-          if (status !== "All") jobParams.status = status;
+          if (status !== "All") jobParams.status = [status];
 
           let jobCursor: string | undefined;
           do {
