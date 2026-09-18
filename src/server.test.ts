@@ -615,6 +615,104 @@ describe("createServer", () => {
   });
 
   describe("ashby_list_applications", () => {
+    // Model upstream pagination, including its page-end cursor. Fixed canned
+    // responses cannot catch matches discarded between two public tool calls.
+    function mockApplications(applications: ReturnType<typeof makeApplication>[]) {
+      mockRequestList.mockImplementation(async (endpoint, params) => {
+        expect(endpoint).toBe("application.list");
+        const offset = params.cursor ? Number(params.cursor) : 0;
+        const end = Math.min(offset + params.limit, applications.length);
+        return {
+          results: applications.slice(offset, end),
+          moreDataAvailable: end < applications.length,
+          nextCursor: end < applications.length ? String(end) : undefined,
+        };
+      });
+    }
+
+    function makeApplication(index: number, matches = true) {
+      return {
+        id: `app-${index}`,
+        status: "Lead",
+        candidate: { id: `candidate-${index}`, name: `Candidate ${index}` },
+        job: { id: "campus-director", title: "Campus Director" },
+        currentInterviewStage: {
+          id: matches ? "lead" : "screen",
+          title: matches ? "New Lead" : "Phone Screen",
+          type: matches ? "Lead" : "Interview",
+        },
+        source: { title: matches ? "Ashby Chrome Extension" : "Applied" },
+        createdAt: matches ? "2024-01-01T00:00:00Z" : "2024-12-01T00:00:00Z",
+      };
+    }
+
+    type ApplicationPage = {
+      items: { application_id: string }[];
+      has_more: boolean;
+      next_cursor: string | null;
+    };
+
+    async function readAllApplications(args: Record<string, unknown>, limit: number) {
+      const client = await setupClient();
+      const ids: string[] = [];
+      let cursor: string | undefined;
+      try {
+        // A broken cursor must fail the test instead of hanging it.
+        for (let pageNumber = 0; pageNumber < 200; pageNumber++) {
+          const page = getJson(await client.callTool({
+            name: "ashby_list_applications",
+            arguments: { job_id: "campus-director", ...args, limit, cursor },
+          })) as ApplicationPage;
+          expect(page.items.length).toBeLessThanOrEqual(limit);
+          ids.push(...page.items.map((item) => item.application_id));
+          if (!page.has_more) {
+            expect(page.next_cursor).toBeNull();
+            return ids;
+          }
+          expect(page.next_cursor).toBeTruthy();
+          expect(page.next_cursor).not.toBe(cursor);
+          cursor = page.next_cursor!;
+        }
+        throw new Error("Application pagination did not terminate");
+      } finally {
+        await client.close();
+      }
+    }
+
+    it.each([1, 25, 100])("returns all 176 leads exactly once with page size %i", async (limit) => {
+      const applications = Array.from({ length: 176 }, (_, index) => makeApplication(index));
+      mockApplications(applications);
+
+      expect(await readAllApplications({ stage_name: "New Lead" }, limit))
+        .toEqual(applications.map((app) => app.id));
+    });
+
+    it.each([
+      { stage_name: "New Lead" },
+      { stage_type: "Lead" },
+      { source: "CHROME" },
+      { created_before: "2024-06-01T00:00:00Z" },
+      { stage_name: "New Lead", stage_type: "Lead", source: "chrome", created_before: "2024-06-01T00:00:00Z" },
+    ])("fills pages across sparse matches without losing the remainder: %j", async (filters) => {
+      const applications = Array.from({ length: 17 }, (_, index) =>
+        makeApplication(index, [0, 6, 7, 8, 9, 13, 14].includes(index)));
+      mockApplications(applications);
+
+      expect(await readAllApplications(filters, 3))
+        .toEqual([0, 6, 7, 8, 9, 13, 14].map((index) => `app-${index}`));
+    });
+
+    it("returns an empty final page when no applications match", async () => {
+      mockApplications(Array.from({ length: 8 }, (_, index) => makeApplication(index, false)));
+      expect(await readAllApplications({ stage_name: "New Lead" }, 3)).toEqual([]);
+    });
+
+    it.each([{}, { stage_type: "All" }])("preserves unfiltered pagination: %j", async (filters) => {
+      const applications = Array.from({ length: 7 }, (_, index) => makeApplication(index));
+      mockApplications(applications);
+      expect(await readAllApplications(filters, 3)).toEqual(applications.map((app) => app.id));
+    });
+
     it("passes date and status filters to the API", async () => {
       mockRequestList.mockResolvedValueOnce({
         results: [

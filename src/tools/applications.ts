@@ -313,18 +313,11 @@ Response: items[] (application_id, candidate_id, candidate_name, candidate_email
     { readOnlyHint: true },
     async ({ created_after, created_before, job_id, status, stage_type, stage_name, source, limit, cursor }) => {
       try {
-        const needsClientFilter = !!(created_before || stage_type || stage_name || source);
-
         // Build server-side params
         const params: Record<string, unknown> = {};
         if (created_after) params.createdAfter = new Date(created_after).getTime();
         if (job_id) params.jobId = job_id;
         if (status !== "All") params.status = status;
-        if (cursor) params.cursor = cursor;
-
-        // If we need client-side filtering, fetch larger batches internally
-        const fetchLimit = needsClientFilter ? 100 : limit;
-        params.limit = fetchLimit;
 
         const items: Array<{
           application_id: string;
@@ -344,9 +337,13 @@ Response: items[] (application_id, candidate_id, candidate_name, candidate_email
 
         // Paginate internally until we have enough matching results
         while (items.length < limit) {
-          if (nextCursor) params.cursor = nextCursor;
-
-          const page = await client.requestList<Application>("application.list", params);
+          // Ashby's cursor advances past the entire raw page. Fetch only as
+          // many rows as we can still return, so no matching rows are discarded.
+          const page = await client.requestList<Application>("application.list", {
+            ...params,
+            limit: limit - items.length,
+            ...(nextCursor ? { cursor: nextCursor } : {}),
+          });
 
           for (const app of page.results) {
             // Client-side filters
@@ -373,8 +370,6 @@ Response: items[] (application_id, candidate_id, candidate_name, candidate_email
               job_title: app.job.title,
               createdAt: app.createdAt,
             });
-
-            if (items.length >= limit) break;
           }
 
           hasMore = page.moreDataAvailable;
@@ -384,11 +379,9 @@ Response: items[] (application_id, candidate_id, candidate_name, candidate_email
           if (!page.moreDataAvailable) break;
         }
 
-        const result = items.slice(0, limit);
-
         return json(
-          `${result.length} application(s) found.`,
-          { items: result, has_more: hasMore || items.length > limit, next_cursor: nextCursor ?? null }
+          `${items.length} application(s) found.`,
+          { items, has_more: hasMore, next_cursor: hasMore ? nextCursor ?? null : null }
         );
       } catch (e) {
         return error(e);
