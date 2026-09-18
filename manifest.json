@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "ashby-mcp",
   "display_name": "Ashby",
-  "version": "1.7.0",
+  "version": "1.7.3",
   "description": "Access your Ashby recruiting data — list jobs, review candidates, read resumes, manage applications, and track your hiring pipeline.",
   "author": {
     "name": "Dewi Erwan",
