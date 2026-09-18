@@ -16,6 +16,14 @@ You need an Ashby API key:
    - `candidatesWrite` — add notes, tags, move application stages, archive applications
    - `hiringProcessMetadataRead` — list archive reasons and email templates
 
+Optional permissions for the raw API tool:
+
+- `apiKeysRead` — inspect the current key with `apiKey.info`.
+- `sourcingRead` — read sequence templates, email senders, and existing sequences.
+- `emailsRead` — read recent candidate email messages.
+
+A `403` with `missing_endpoint_permission` requires updating the key's permissions in Ashby Admin > Integrations > API Keys. The MCP reports the endpoint and required permission for these operations. Email and sequence endpoints may also require beta access for your organization; see the [Ashby authentication reference](https://developers.ashbyhq.com/reference/authentication) and the endpoint's documentation.
+
 ## Install
 
 ### Claude Code (recommended)

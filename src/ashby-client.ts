@@ -59,9 +59,26 @@ export class AshbyClient {
       const retryable = response.status === 429 || response.status >= 500;
       if (!retryable || attempt === MAX_RETRIES - 1) {
         logger.error("api request failed", { endpoint, status: response.status, attempt: attempt + 1, ms });
+        // Non-2xx responses also contain Ashby's error envelope. Preserve it
+        // so a missing scope can be distinguished from other kinds of 403.
+        let detail: string | undefined;
+        let code: string | undefined;
+        try {
+          const data = (await response.json()) as AshbyErrorResponse | null;
+          if (typeof data?.errorInfo?.code === "string") code = data.errorInfo.code;
+          if (typeof data?.errorInfo?.message === "string") {
+            detail = data.errorInfo.message;
+          } else if (Array.isArray(data?.errors)) {
+            detail = data.errors.filter((value) => typeof value === "string").join(", ");
+          }
+        } catch {
+          // Gateways may return HTML or an empty body; retain the HTTP status.
+        }
         throw new AshbyApiError(
-          `HTTP ${response.status}: ${response.statusText}`,
-          response.status
+          `HTTP ${response.status}: ${response.statusText}${detail ? `: ${detail}` : ""}`,
+          response.status,
+          code,
+          endpoint
         );
       }
 
@@ -161,7 +178,8 @@ export class AshbyApiError extends Error {
   constructor(
     message: string,
     public readonly httpStatus?: number,
-    public readonly code?: string
+    public readonly code?: string,
+    public readonly endpoint?: string
   ) {
     super(message);
     this.name = "AshbyApiError";

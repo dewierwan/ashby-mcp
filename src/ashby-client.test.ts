@@ -14,7 +14,7 @@ function mockResponse(status: number, body: unknown, headers?: Record<string, st
 
 function statusText(code: number): string {
   const map: Record<number, string> = {
-    200: "OK", 400: "Bad Request", 404: "Not Found",
+    200: "OK", 400: "Bad Request", 403: "Forbidden", 404: "Not Found",
     429: "Too Many Requests", 500: "Internal Server Error", 503: "Service Unavailable",
   };
   return map[code] ?? "Unknown";
@@ -111,6 +111,45 @@ describe("AshbyClient", () => {
       } catch (e) {
         expect((e as AshbyApiError).httpStatus).toBe(400);
       }
+    });
+  });
+
+  describe("HTTP error details", () => {
+    it("preserves the Ashby error code and endpoint on forbidden requests", async () => {
+      fetchSpy.mockResolvedValueOnce(mockResponse(403, {
+        success: false,
+        errors: ["missing_endpoint_permission"],
+        errorInfo: { code: "missing_endpoint_permission" },
+      }));
+      await expect(new AshbyClient().rawRequest("sequence.list", {})).rejects.toMatchObject({
+        httpStatus: 403,
+        code: "missing_endpoint_permission",
+        endpoint: "sequence.list",
+        message: "HTTP 403: Forbidden: missing_endpoint_permission",
+      });
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+    });
+
+    it("retains a human-readable API error message", async () => {
+      fetchSpy.mockResolvedValueOnce(mockResponse(403, {
+        success: false,
+        errorInfo: { code: "forbidden", message: "This API key is deactivated" },
+      }));
+      await expect(new AshbyClient().request("apiKey.info")).rejects.toThrow(
+        "HTTP 403: Forbidden: This API key is deactivated"
+      );
+    });
+
+    it("keeps the HTTP error when a gateway returns a non-JSON body", async () => {
+      fetchSpy.mockResolvedValueOnce({
+        ...mockResponse(403, {}),
+        json: () => Promise.reject(new SyntaxError("Unexpected token <")),
+      });
+      await expect(new AshbyClient().rawRequest("apiKey.info")).rejects.toMatchObject({
+        httpStatus: 403,
+        endpoint: "apiKey.info",
+        message: "HTTP 403: Forbidden",
+      });
     });
   });
 

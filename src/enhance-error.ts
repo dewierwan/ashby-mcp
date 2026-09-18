@@ -23,6 +23,11 @@ const PERMISSION_MAP: Record<string, string> = {
   "archiveReason.list": "hiringProcessMetadataRead",
   "communicationTemplate.list": "hiringProcessMetadataRead",
   "file.info": "candidatesRead",
+  "apiKey.info": "apiKeysRead",
+  "sequenceTemplate.list": "sourcingRead",
+  "emailSender.list": "sourcingRead",
+  "sequence.list": "sourcingRead",
+  "candidate.getRecentEmailMessages": "emailsRead",
 };
 
 /**
@@ -30,7 +35,7 @@ const PERMISSION_MAP: Record<string, string> = {
  * on how to fix the issue.
  */
 export function enhanceError(err: AshbyApiError): string {
-  const base = `Ashby API error: ${err.message}${err.code ? ` (code: ${err.code})` : ""}`;
+  const base = `Ashby API error: ${err.message}${err.code ? ` (code: ${err.code})` : ""}${err.endpoint ? ` [${err.endpoint}]` : ""}`;
 
   if (err.httpStatus === 401) {
     return (
@@ -42,17 +47,20 @@ export function enhanceError(err: AshbyApiError): string {
     );
   }
 
+  if (err.code === "missing_endpoint_permission") {
+    const permission = getRequiredPermission(err.endpoint ?? "");
+    return (
+      `${base}\n\n` +
+      `${err.endpoint ?? "This endpoint"} requires ${permission ? `the ${permission} permission` : "an additional API-key permission"}.\n` +
+      `Update your key at: Ashby Admin > Integrations > API Keys`
+    );
+  }
+
   if (err.httpStatus === 403) {
     return (
       `${base}\n\n` +
-      `Your API key lacks the required permission.\n` +
-      `Required permissions for common operations:\n` +
-      `- candidatesRead: read candidate profiles, applications, notes, feedback\n` +
-      `- candidatesWrite: add notes, tags, move stages, archive\n` +
-      `- jobsRead: read jobs and job postings\n` +
-      `- interviewsRead: read interview stages, plans, and schedules\n` +
-      `- hiringProcessMetadataRead: list archive reasons and email templates\n` +
-      `Update your key at: Ashby Admin > Integrations > API Keys`
+      `Access was denied. Check that your API key is active and has permission for this endpoint.\n` +
+      `Review your key at: Ashby Admin > Integrations > API Keys`
     );
   }
 

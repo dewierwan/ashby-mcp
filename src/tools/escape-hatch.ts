@@ -70,6 +70,21 @@ tool for those. The rest are reachable via \`ashby_call_api\`.
 - \`applicationFeedback.list\` ✓ — list submitted feedback.
 - \`applicationFormSubmission.list\` ✓ — candidate form responses.
 
+### API key details (permission: \`apiKeysRead\`)
+- \`apiKey.info\` — inspect the current API key. No params.
+
+### Sourcing (permission: \`sourcingRead\`)
+- \`sequenceTemplate.list\` — reusable sequence templates. Params: \`limit\`, \`cursor\`.
+- \`emailSender.list\` — available sender addresses. No params. Beta.
+- \`sequence.list\` — existing sequence enrollments. Params: \`candidateId\` (optional), \`limit\`, \`cursor\`. Beta.
+
+### Emails (permission: \`emailsRead\`)
+- \`candidate.getRecentEmailMessages\` — recent messages. Requires \`candidateId\`; optional \`limit\`, \`cursor\`. Beta.
+
+A 403 with \`missing_endpoint_permission\` means the current key needs the
+relevant scope enabled in Ashby Admin > Integrations > API Keys. Beta endpoints
+may also require organization access after the scope is enabled.
+
 ### Interviews (permission: \`interviewsRead\`)
 - \`interviewPlan.list\` — list all interview plans.
 - \`interviewStage.list\` ✓ — stages. **Requires \`interviewPlanId\`.**
