@@ -65,13 +65,14 @@ describe("createServer", () => {
     const client = await setupClient();
     const { tools } = await client.listTools();
 
-    expect(tools).toHaveLength(24);
+    expect(tools).toHaveLength(25);
     const names = tools.map((t) => t.name).sort();
     expect(names).toEqual([
       "ashby_add_candidate_note",
       "ashby_add_candidate_tag",
       "ashby_add_lead",
       "ashby_archive_application",
+      "ashby_archive_by_filter",
       "ashby_bulk_archive",
       "ashby_call_api",
       "ashby_get_api_docs",
@@ -1402,6 +1403,287 @@ describe("createServer", () => {
       const data = getJson(result) as { error: string };
 
       expect(data.error).toContain("email_template_id is required");
+    });
+  });
+
+  describe("ashby_archive_by_filter", () => {
+    type App = {
+      id: string;
+      status: string;
+      createdAt: string;
+      candidate: { id: string; name: string };
+      job: { id: string; title: string };
+      currentInterviewStage?: { id: string; title: string; type: string; interviewPlanId?: string };
+    };
+
+    function app(id: string, jobId: string, overrides: Partial<App> & { stage?: string; stageType?: string } = {}): App {
+      const { stage = "New Lead", stageType = "Lead", ...rest } = overrides;
+      return {
+        id,
+        status: "Lead",
+        createdAt: "2026-05-01T00:00:00Z",
+        candidate: { id: `cand-${id}`, name: `Name ${id}` },
+        job: { id: jobId, title: `Job ${jobId}` },
+        currentInterviewStage: { id: `stage-${stage}`, title: stage, type: stageType, interviewPlanId: `plan-${jobId}` },
+        ...rest,
+      };
+    }
+
+    // Route list calls by endpoint. applicationsByJob maps jobId (or "*" for unfiltered) to pages.
+    function mockLists(opts: { jobPages?: unknown[][]; appPages: Record<string, App[][]> }) {
+      mockRequestList.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "job.list") {
+          const pages = opts.jobPages ?? [[]];
+          const i = params.cursor ? Number(params.cursor) : 0;
+          return Promise.resolve({
+            results: pages[i],
+            moreDataAvailable: i < pages.length - 1,
+            nextCursor: i < pages.length - 1 ? String(i + 1) : undefined,
+          });
+        }
+        if (endpoint === "application.list") {
+          const pages = opts.appPages[(params.jobId as string) ?? "*"] ?? [[]];
+          const i = params.cursor ? Number(params.cursor) : 0;
+          return Promise.resolve({
+            results: pages[i],
+            moreDataAvailable: i < pages.length - 1,
+            nextCursor: i < pages.length - 1 ? String(i + 1) : undefined,
+          });
+        }
+        if (endpoint === "interviewStage.list") {
+          return Promise.resolve({
+            results: [{ id: `archived-${params.interviewPlanId}`, title: "Archived", type: "Archived", orderInInterviewPlan: 99 }],
+            moreDataAvailable: false,
+          });
+        }
+        return Promise.reject(new Error(`unexpected list: ${endpoint}`));
+      });
+    }
+
+    function changeStageCalls() {
+      return mockRequest.mock.calls.filter(([endpoint]) => endpoint === "application.changeStage");
+    }
+
+    type Result = {
+      dry_run: boolean;
+      refused?: boolean;
+      cap_exceeded?: boolean;
+      error?: string;
+      totals: {
+        matched: number;
+        to_archive: number;
+        archived: number;
+        skipped: number;
+        skipped_by_reason: Record<string, number>;
+        failed: number;
+      };
+      jobs: { job_id: string; job_title: string; matched: number; to_archive: number; archived?: number; failed?: number; sample_names?: string[] }[];
+      failures?: { application_id: string; candidate_name: string; job_title: string; error: string }[];
+    };
+
+    async function call(args: Record<string, unknown>): Promise<Result> {
+      const client = await setupClient();
+      const result = await client.callTool({ name: "ashby_archive_by_filter", arguments: args });
+      return getJson(result) as Result;
+    }
+
+    it("requires at least one filter", async () => {
+      const data = await call({ exclude_candidate_ids: ["c1"] });
+      expect(data.error).toContain("At least one filter is required");
+      expect(mockRequestList).not.toHaveBeenCalled();
+    });
+
+    it("requires archive_reason_id for a real run", async () => {
+      const data = await call({ job_ids: ["j1"], dry_run: false });
+      expect(data.error).toContain("archive_reason_id is required");
+      expect(mockRequestList).not.toHaveBeenCalled();
+    });
+
+    it("requires email_template_id when send_email is true", async () => {
+      const data = await call({ job_ids: ["j1"], dry_run: false, archive_reason_id: "r1", send_email: true });
+      expect(data.error).toContain("email_template_id is required");
+    });
+
+    it("combines job and application filters with AND and writes nothing in a dry run", async () => {
+      mockLists({
+        jobPages: [
+          [
+            { id: "j-old", title: "Old Role", status: "Closed", createdAt: "2025-01-01", updatedAt: "2026-06-01T00:00:00Z" },
+            { id: "j-new", title: "Recent Role", status: "Closed", createdAt: "2025-01-01", updatedAt: "2026-08-01T00:00:00Z" },
+          ],
+        ],
+        appPages: {
+          "j-old": [
+            [
+              app("a1", "j-old"),
+              app("a2", "j-old", { stage: "Replied" }),
+              app("a3", "j-old", { stage: "Phone Screen", stageType: "Interview" }), // stage filtered out
+              app("a4", "j-old", { createdAt: "2026-07-10T00:00:00Z" }), // created after cutoff
+            ],
+          ],
+          "j-new": [[app("b1", "j-new")]],
+        },
+      });
+
+      const data = await call({
+        job_status: ["Closed"],
+        job_closed_before: "2026-07-04",
+        application_status: ["Lead"],
+        stage_titles: ["new lead", "Replied"],
+        created_before: "2026-07-01",
+      });
+
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", expect.objectContaining({ status: ["Closed"] }));
+      // Single application status is pushed server-side
+      expect(mockRequestList).toHaveBeenCalledWith("application.list", expect.objectContaining({ jobId: "j-old", status: "Lead" }));
+      // Job updated after job_closed_before is never listed
+      expect(mockRequestList).not.toHaveBeenCalledWith("application.list", expect.objectContaining({ jobId: "j-new" }));
+
+      expect(data.dry_run).toBe(true);
+      expect(data.totals).toMatchObject({ matched: 2, to_archive: 2, archived: 0, skipped: 0, failed: 0 });
+      expect(data.jobs).toEqual([
+        { job_id: "j-old", job_title: "Old Role", matched: 2, to_archive: 2, skipped: 0, sample_names: ["Name a1", "Name a2"] },
+      ]);
+      expect(mockRequest).not.toHaveBeenCalled();
+      expect(changeStageCalls()).toHaveLength(0);
+    });
+
+    it("defaults job_closed_before to Closed and Archived jobs", async () => {
+      mockLists({ jobPages: [[]], appPages: {} });
+      await call({ job_closed_before: "2026-07-04" });
+      expect(mockRequestList).toHaveBeenCalledWith("job.list", expect.objectContaining({ status: ["Closed", "Archived"] }));
+    });
+
+    it("skips Hired, already-archived and keep-listed applications", async () => {
+      mockLists({
+        appPages: {
+          j1: [
+            [
+              app("keep-me", "j1"),
+              app("a2", "j1", { candidate: { id: "vip", name: "VIP" } }),
+              app("hired", "j1", { status: "Hired", stage: "Hired", stageType: "Hired" }),
+              app("done", "j1", { status: "Archived", stage: "Archived", stageType: "Archived" }),
+              app("a5", "j1"),
+            ],
+          ],
+        },
+      });
+      mockRequest.mockResolvedValue({});
+
+      const data = await call({
+        job_ids: ["j1"],
+        exclude_application_ids: ["keep-me"],
+        exclude_candidate_ids: ["vip"],
+        dry_run: false,
+        archive_reason_id: "reason-1",
+      });
+
+      expect(data.totals).toMatchObject({
+        matched: 5,
+        to_archive: 1,
+        archived: 1,
+        skipped: 4,
+        skipped_by_reason: { hired: 1, already_archived: 1, excluded_candidate: 1, excluded_application: 1 },
+        failed: 0,
+      });
+      const archivedIds = changeStageCalls().map(([, params]) => (params as { applicationId: string }).applicationId);
+      expect(archivedIds).toEqual(["a5"]);
+      expect(changeStageCalls()[0][1]).toEqual({ applicationId: "a5", interviewStageId: "archived-plan-j1", archiveReasonId: "reason-1" });
+    });
+
+    it("paginates job.list and application.list", async () => {
+      mockLists({
+        jobPages: [
+          [{ id: "j1", title: "One", status: "Closed", createdAt: "", updatedAt: "2026-01-01" }],
+          [{ id: "j2", title: "Two", status: "Closed", createdAt: "", updatedAt: "2026-01-01" }],
+        ],
+        appPages: {
+          j1: [[app("a1", "j1"), app("a2", "j1")], [app("a3", "j1")]],
+          j2: [[app("b1", "j2")], [app("b2", "j2")], [app("b3", "j2")]],
+        },
+      });
+
+      const data = await call({ job_status: ["Closed"] });
+
+      expect(data.totals.matched).toBe(6);
+      expect(data.jobs.map((j) => [j.job_title, j.matched])).toEqual([
+        ["One", 3],
+        ["Two", 3],
+      ]);
+    });
+
+    it("lists applications across all jobs when there is no job filter", async () => {
+      mockLists({ appPages: { "*": [[app("a1", "j1"), app("a2", "j2", { status: "Active" })]] } });
+      const data = await call({ application_status: ["Lead", "Active"] });
+      // Multiple statuses are filtered client-side, not sent to Ashby
+      expect(mockRequestList).toHaveBeenCalledWith("application.list", expect.not.objectContaining({ status: expect.anything() }));
+      expect(data.totals.to_archive).toBe(2);
+    });
+
+    it("caps dry-run samples at 10 per job and never returns application IDs", async () => {
+      mockLists({ appPages: { j1: [Array.from({ length: 15 }, (_, i) => app(`a${i}`, "j1"))] } });
+      const client = await setupClient();
+      const result = await client.callTool({ name: "ashby_archive_by_filter", arguments: { job_ids: ["j1"] } });
+      const data = getJson(result) as Result;
+
+      expect(data.totals.to_archive).toBe(15);
+      expect(data.jobs[0].sample_names).toHaveLength(10);
+      const text = (result as { content: { text: string }[] }).content.map((c) => c.text).join("\n");
+      expect(text).not.toContain('"a14"');
+    });
+
+    it("refuses a real run above max_applications and writes nothing", async () => {
+      mockLists({ appPages: { j1: [[app("a1", "j1"), app("a2", "j1"), app("a3", "j1")]] } });
+
+      const data = await call({ job_ids: ["j1"], dry_run: false, archive_reason_id: "r1", max_applications: 2 });
+
+      expect(data.refused).toBe(true);
+      expect(data.totals.to_archive).toBe(3);
+      expect(changeStageCalls()).toHaveLength(0);
+    });
+
+    it("reports the cap overage in a dry run instead of refusing", async () => {
+      mockLists({ appPages: { j1: [[app("a1", "j1"), app("a2", "j1"), app("a3", "j1")]] } });
+      const data = await call({ job_ids: ["j1"], max_applications: 2 });
+      expect(data.cap_exceeded).toBe(true);
+      expect(data.jobs[0].sample_names).toHaveLength(3);
+    });
+
+    it("collects partial failures without stopping the run, and caches stage lookups", async () => {
+      mockLists({
+        appPages: {
+          j1: [[app("a1", "j1"), app("bad", "j1"), app("a3", "j1"), app("a4", "j1"), app("a5", "j1"), app("a6", "j1")]],
+        },
+      });
+      mockRequest.mockImplementation((endpoint: string, params: Record<string, unknown>) => {
+        if (endpoint === "application.changeStage" && params.applicationId === "bad") {
+          return Promise.reject(new AshbyApiError("Application is locked", 200, "invalid_input"));
+        }
+        if (endpoint === "application.changeStage") return Promise.resolve({ id: params.applicationId, status: "Archived" });
+        return Promise.reject(new Error(`unexpected: ${endpoint}`));
+      });
+
+      const data = await call({ job_ids: ["j1"], dry_run: false, archive_reason_id: "r1" });
+
+      expect(data.totals).toMatchObject({ to_archive: 6, archived: 5, failed: 1 });
+      expect(data.jobs[0]).toMatchObject({ job_title: "Job j1", archived: 5, failed: 1 });
+      expect(data.failures).toEqual([
+        {
+          application_id: "bad",
+          candidate_name: "Name bad",
+          job_title: "Job j1",
+          error: "Ashby API error: Application is locked (invalid_input)",
+        },
+      ]);
+      const stageLookups = mockRequestList.mock.calls.filter(([endpoint]) => endpoint === "interviewStage.list");
+      expect(stageLookups).toHaveLength(1);
+    });
+
+    it("sends the rejection email template when send_email is true", async () => {
+      mockLists({ appPages: { j1: [[app("a1", "j1")]] } });
+      mockRequest.mockResolvedValue({});
+      await call({ job_ids: ["j1"], dry_run: false, archive_reason_id: "r1", send_email: true, email_template_id: "t1" });
+      expect(changeStageCalls()[0][1]).toMatchObject({ archiveEmail: { communicationTemplateId: "t1" } });
     });
   });
 

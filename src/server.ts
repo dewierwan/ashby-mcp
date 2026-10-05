@@ -4,6 +4,7 @@ import { AshbyClient } from "./ashby-client.js";
 import { registerJobTools } from "./tools/jobs.js";
 import { registerCandidateTools } from "./tools/candidates.js";
 import { registerApplicationTools } from "./tools/applications.js";
+import { registerArchiveByFilterTools } from "./tools/archive-by-filter.js";
 import { registerInterviewTools } from "./tools/interviews.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerEscapeHatchTools } from "./tools/escape-hatch.js";
@@ -30,6 +31,7 @@ export function createServer(): McpServer {
   registerJobTools(server, client);
   registerCandidateTools(server, client);
   registerApplicationTools(server, client);
+  registerArchiveByFilterTools(server, client);
   registerInterviewTools(server, client);
   registerWorkflowTools(server, client);
   registerEscapeHatchTools(server, client);

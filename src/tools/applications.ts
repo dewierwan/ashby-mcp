@@ -1,7 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AshbyClient } from "../ashby-client.js";
-import { AshbyApiError } from "../ashby-client.js";
 import type {
   Application,
   ApplicationHistoryEntry,
@@ -12,6 +11,7 @@ import type {
 } from "../types.js";
 import { error, json } from "../tool-helpers.js";
 import { logger } from "../logger.js";
+import { createArchiver, describeError, runPool } from "../archive.js";
 
 export function registerApplicationTools(server: McpServer, client: AshbyClient): void {
   // ── ashby_list_candidates_for_job ────────────────────────────────────
@@ -483,6 +483,7 @@ Response: application_id, status, archive_reason_id, email_sent, message.`,
     `Archive multiple applications at once with an optional reason and rejection email.
 
 Accepts up to 25 application IDs. Uses the same archiving logic as ashby_archive_application for each one.
+For larger cleanups, use ashby_archive_by_filter, which finds the applications itself.
 Caches interview plan lookups for efficiency when applications share the same job.
 
 Response: total, succeeded, failed, results[] (application_id, success, error?).`,
@@ -515,66 +516,20 @@ Response: total, succeeded, failed, results[] (application_id, success, error?).
           );
         }
 
-        // Cache: interviewPlanId -> archived stage ID
-        const archivedStageCache = new Map<string, string>();
+        const archiver = createArchiver(client, {
+          archiveReasonId: archive_reason_id,
+          emailTemplateId: send_email ? email_template_id : undefined,
+        });
 
-        async function archiveOne(appId: string): Promise<{ application_id: string; success: boolean; error?: string }> {
-          // 1. Get application
-          const app = await client.request<Application>("application.info", { applicationId: appId });
-
-          // 2. Resolve interview plan ID
-          let planId = app.currentInterviewStage?.interviewPlanId;
-          if (!planId) {
-            const job = await client.request<Job>("job.info", { id: app.job.id });
-            planId = (job.interviewPlanIds ?? [])[0] ?? job.defaultInterviewPlanId;
+        const results = await runPool(application_ids, 5, async (appId) => {
+          try {
+            const app = await client.request<Application>("application.info", { applicationId: appId });
+            await archiver.archive(app);
+            return { application_id: appId, success: true } as { application_id: string; success: boolean; error?: string };
+          } catch (e) {
+            return { application_id: appId, success: false, error: describeError(e) };
           }
-          if (!planId) {
-            return { application_id: appId, success: false, error: "Could not determine interview plan." };
-          }
-
-          // 3. Find archived stage (cached)
-          let archivedStageId = archivedStageCache.get(planId);
-          if (!archivedStageId) {
-            const stagePage = await client.requestList<InterviewStage>("interviewStage.list", { interviewPlanId: planId });
-            const archived = stagePage.results.find((s) => s.type === "Archived");
-            if (!archived) {
-              return { application_id: appId, success: false, error: `No archived stage in plan ${planId}.` };
-            }
-            archivedStageId = archived.id;
-            archivedStageCache.set(planId, archivedStageId);
-          }
-
-          // 4. Archive
-          const params: Record<string, unknown> = {
-            applicationId: appId,
-            interviewStageId: archivedStageId,
-          };
-          if (archive_reason_id) params.archiveReasonId = archive_reason_id;
-          if (send_email && email_template_id) {
-            params.archiveEmail = { communicationTemplateId: email_template_id };
-          }
-
-          await client.request<Application>("application.changeStage", params);
-          return { application_id: appId, success: true };
-        }
-
-        // Process in batches of 5
-        const results: Array<{ application_id: string; success: boolean; error?: string }> = [];
-        for (let i = 0; i < application_ids.length; i += 5) {
-          const batch = application_ids.slice(i, i + 5);
-          const batchResults = await Promise.all(
-            batch.map((appId) =>
-              archiveOne(appId).catch((e) => ({
-                application_id: appId,
-                success: false,
-                error: e instanceof AshbyApiError
-                  ? `Ashby API error: ${e.message}${e.code ? ` (${e.code})` : ""}`
-                  : e instanceof Error ? e.message : String(e),
-              }))
-            )
-          );
-          results.push(...batchResults);
-        }
+        });
 
         const succeeded = results.filter((r) => r.success).length;
         const failed = results.filter((r) => !r.success).length;

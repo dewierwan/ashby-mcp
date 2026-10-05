@@ -248,6 +248,56 @@ Archive multiple applications at once (max 25).
 | `send_email` | `boolean` | `false` | Send rejection emails |
 | `email_template_id` | `string` | — | Template ID for rejection emails |
 
+#### `ashby_archive_by_filter`
+
+Find and archive every application matching a set of filters in one call. It pages through `application.list` itself, so you don't need to collect IDs first. Use it for bulk cleanups instead of `ashby_bulk_archive`.
+
+Filters combine with AND. At least one filter is required, so the tool can never run unfiltered.
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `job_ids` | `string[]` | — | Only these jobs |
+| `job_status` | `("Open" \| "Closed" \| "Archived" \| "Draft")[]` | — | Only jobs with these statuses |
+| `job_closed_before` | `string` (ISO date) | — | Only jobs whose `updatedAt` is before this date. Ashby has no closed-at field, so `updatedAt` is the proxy; a later edit to a job makes it look more recently closed. Without `job_status`, only Closed and Archived jobs are considered. |
+| `application_status` | `("Active" \| "Lead")[]` | — | Only applications with these statuses |
+| `stage_titles` | `string[]` | — | Only applications whose current stage title matches (case-insensitive) |
+| `created_before` | `string` (ISO date) | — | Only applications created before this date |
+| `exclude_candidate_ids` | `string[]` | — | Keep-list: never archive these candidates' applications |
+| `exclude_application_ids` | `string[]` | — | Keep-list: never archive these applications |
+| `archive_reason_id` | `string` | — | Reason ID. Required when `dry_run` is `false`. |
+| `send_email` | `boolean` | `false` | Send rejection emails (requires `email_template_id`) |
+| `email_template_id` | `string` | — | Template ID for rejection emails |
+| `dry_run` | `boolean` | `true` | Report what would be archived without changing anything |
+| `max_applications` | `number` | `500` | Safety cap. A real run refuses if more would be archived. |
+
+Hired and already-archived applications are never touched. Archives run five at a time, with extra backoff on 429 and 5xx responses. One failure never stops the run.
+
+The response is compact: totals (matched, to archive, archived, skipped by reason, failed), a per-job breakdown, up to 10 sample names per job in a dry run, and every failure with its error. It does not list archived IDs.
+
+**Safe workflow:** always run with `dry_run: true` first (the default). Check the totals, per-job counts and sample names, then repeat the same call with `dry_run: false`.
+
+Dry run: preview every lead on jobs closed before 4 July 2026.
+
+```json
+{
+  "job_closed_before": "2026-07-04",
+  "application_status": ["Lead"]
+}
+```
+
+Real run: archive them, keeping two candidates and allowing up to 1,500 archives.
+
+```json
+{
+  "job_closed_before": "2026-07-04",
+  "application_status": ["Lead"],
+  "exclude_candidate_ids": ["<candidate-uuid>", "<candidate-uuid>"],
+  "archive_reason_id": "<reason-uuid>",
+  "dry_run": false,
+  "max_applications": 1500
+}
+```
+
 ### Interviews
 
 #### `ashby_list_interview_stages`
@@ -341,6 +391,8 @@ Archive John Smith's application for the Senior Engineer role with reason "Not e
 Show me the available archive reasons and rejection email templates.
 
 Bulk archive all candidates in Application Review for the closed Designer role.
+
+Dry-run archiving every lead on jobs closed before July, then archive them.
 ```
 
 ## Privacy
