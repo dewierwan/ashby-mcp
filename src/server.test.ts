@@ -96,6 +96,25 @@ describe("createServer", () => {
     ]);
   });
 
+  it("sends plain-English writing rules as server instructions", async () => {
+    const client = await setupClient();
+    const instructions = client.getInstructions() ?? "";
+
+    expect(instructions).toContain("plain English");
+    expect(instructions).toContain("ashby_call_api");
+  });
+
+  it("puts the writing guide in every tool that writes a note", async () => {
+    const client = await setupClient();
+    const { tools } = await client.listTools();
+
+    for (const name of ["ashby_add_candidate_note", "ashby_add_lead"]) {
+      const description = tools.find((t) => t.name === name)?.description ?? "";
+      expect(description).toContain("Plain English:");
+      expect(description).toContain("No jargon");
+    }
+  });
+
   describe("ashby_list_jobs", () => {
     it("maps response fields correctly", async () => {
       mockRequestList.mockResolvedValueOnce({
@@ -1825,6 +1844,54 @@ describe("createServer", () => {
 
       const body = JSON.parse(content[1].text);
       expect(body).toEqual(rawBody);
+    });
+
+    it("formats a candidate.createNote string note like the note tool does", async () => {
+      mockRawRequest.mockResolvedValueOnce({ success: true, results: { id: "note-1" } });
+
+      const client = await setupClient();
+      await client.callTool({
+        name: "ashby_call_api",
+        arguments: {
+          endpoint: "candidate.createNote",
+          params: { candidateId: "cand-1", note: "**Called her.** No answer.", sendNotifications: false },
+        },
+      });
+
+      expect(mockRawRequest).toHaveBeenCalledWith("candidate.createNote", {
+        candidateId: "cand-1",
+        note: { type: "text/html", value: "<p><b>Called her.</b> No answer.</p>" },
+        sendNotifications: false,
+      });
+    });
+
+    it("rejects an unreadable candidate.createNote note, including hand-built HTML", async () => {
+      const client = await setupClient();
+      const wall = "A sentence about the candidate. ".repeat(30);
+
+      for (const note of [wall, { type: "text/html", value: `<p>${wall}</p>` }]) {
+        const result = (await client.callTool({
+          name: "ashby_call_api",
+          arguments: { endpoint: "candidate.createNote", params: { candidateId: "cand-1", note } },
+        })) as { content: { text: string }[]; isError?: boolean };
+
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain("Note not saved");
+      }
+      expect(mockRawRequest).not.toHaveBeenCalled();
+    });
+
+    it("sends a readable hand-built HTML note unchanged", async () => {
+      mockRawRequest.mockResolvedValueOnce({ success: true, results: { id: "note-1" } });
+      const note = { type: "text/html", value: "<p>Short note</p>" };
+
+      const client = await setupClient();
+      await client.callTool({
+        name: "ashby_call_api",
+        arguments: { endpoint: "candidate.createNote", params: { candidateId: "cand-1", note } },
+      });
+
+      expect(mockRawRequest).toHaveBeenCalledWith("candidate.createNote", { candidateId: "cand-1", note });
     });
 
     it("defaults params to {} when omitted", async () => {

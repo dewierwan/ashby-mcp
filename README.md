@@ -166,24 +166,35 @@ Add a note to a candidate. Visible to the hiring team.
 
 #### Note formatting
 
-`ashby_add_candidate_note` and `ashby_add_lead` take the note as Markdown and convert it to the rich text Ashby renders, so notes are easy to skim in a candidate's feed. The tool descriptions tell the agent how to lay a note out: one summary sentence, then short bold labels with one fact per bullet.
+Everything an agent writes into a candidate's feed should be easy for a busy person to read. The server does three things to get there, on every route a note can take (`ashby_add_candidate_note`, `ashby_add_lead`, and `candidate.createNote` through `ashby_call_api`):
+
+1. **Tells the agent how to write.** The tool descriptions and the server's connection instructions carry a short guide: plain English, short sentences, no jargon, tool names, field names or IDs; the main point in the first sentence; then short bold labels with one fact per bullet. The guide is general, so it fits a sourced lead, an assessment, a call summary or a one-line update.
+2. **Formats the note.** The agent writes Markdown and the server converts it to the rich text Ashby renders.
+3. **Rejects notes that are hard to read**, before anything is created, with instructions to fix them:
+   - any single line over 600 characters (a long note written as one paragraph);
+   - a raw ID such as a UUID outside a link;
+   - a raw field name used as a label, such as `personal_website:`.
+
+Word choice and tone cannot be checked by code, so those rest on the guide.
 
 ```markdown
-**Sourced lead for Staff Engineer.** Added by Sam on 3 Mar 2026 from the [conference speaker list](https://example.com/speakers).
+**Recommend moving her to the final interview.** Based on her work test and resume, reviewed on 3 Mar 2026.
 
-**Background**
-- Staff engineer at Acme since 2022; led the payments rewrite
-- Based in London
+**Evidence**
+- Work test: she found the pricing bug and explained the fix clearly
+- Led a team of 6 at Acme for two years
 
-**To check**
-- Whether she is open to moving
-- UK work authorization
+**Concerns**
+- No experience managing a budget
+
+**Next step**
+- Sam to book the final interview
 ```
 
 - Supported: `**bold**`, `*italic*`, `` `code` ``, `[label](url)`, bare URLs, `- ` bullets (indent two spaces to nest), `1. ` numbered lists, and blank lines between paragraphs.
 - A `#` heading becomes a bold line, because Ashby flattens heading tags sent through its API. Tables are not supported.
 - Plain text still works and keeps its line breaks.
-- A note with any single line over 600 characters is rejected before anything is created, with instructions to restructure it. This stops agents from saving a long note as one paragraph.
+- To change the guide or the checks, edit `src/note-format.ts`.
 
 #### `ashby_add_candidate_tag`
 

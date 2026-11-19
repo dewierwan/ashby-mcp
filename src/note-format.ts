@@ -1,5 +1,5 @@
 /**
- * Candidate notes: writing guide, wall-of-text guard, and Markdown → HTML.
+ * Candidate notes: writing guide, readability check, and Markdown → HTML.
  *
  * Ashby's `candidate.createNote` takes plain text or `{ type: "text/html" }`.
  * Plain text keeps line breaks but shows Markdown literally. HTML sent through
@@ -15,44 +15,102 @@
 /** Longest line of visible text a note may contain before it is rejected. */
 export const MAX_NOTE_LINE_LENGTH = 600;
 
-/** Shared writing guide, appended to the description of every tool that writes a note. */
-export const NOTE_WRITING_GUIDE = `How to write the note (it is read by busy people skimming a candidate's feed):
+/**
+ * Rules for any text written into Ashby, whatever the task. Kept free of
+ * workflow-specific wording so they fit a lead note, an assessment, a call
+ * summary or a one-line update equally.
+ */
+export const PLAIN_ENGLISH_RULES = `Plain English:
+- Use short sentences and common words, one idea per sentence. Write "used", not "leveraged"; "about", not "regarding".
+- No jargon, internal shorthand or tool-speak. Leave out tool names, field names, IDs and descriptions of your own process ("scorer estimate", "per the pipeline run"). Spell out an abbreviation the first time unless the whole hiring team uses it.
+- Say who did what and when, with names and dates: "Sam emailed her on 3 Mar 2026", not "outreach was conducted".
+- Include only what helps someone decide or act. No filler, no repeated facts, no stacked hedges.
+- Keep facts apart from your opinion. Say where a fact came from, and mark anything you could not verify.`;
+
+/** Full guide, appended to the description of every tool that writes a note. */
+export const NOTE_WRITING_GUIDE = `How to write the note. People on the hiring team read it later, skimming a candidate's feed, without your conversation in front of them. These rules apply to every kind of note: a sourced lead, an assessment, a call or reference summary, a status update, a data correction.
+
+${PLAIN_ENGLISH_RULES}
+
+Layout:
 - Write Markdown. It is converted to the rich text Ashby renders: **bold**, *italic*, \`code\`, [label](https://url), "- " bullets (indent two spaces to nest), "1. " numbered lists, and a blank line between paragraphs. A "#" heading becomes a bold line. Tables are not supported.
-- Line 1 is one sentence a reader can stop after: what this note is, who or what it came from, and the date.
-- Put everything else under short bold labels, each followed by bullets with one fact per bullet. Use only the labels that have content, for example **Background**, **Why them**, **Status**, **To check**, **Next step**.
-- Keep quotes from other people in their own paragraph, in quotation marks, with who said it.
+- Line 1 is one sentence a reader can stop after: the main point (what happened, what you found, or what you recommend), with who and when.
+- If there is more, group it under short bold labels with one fact per bullet. Choose labels that fit this note, for example **Background**, **Evidence**, **Concerns**, **Status**, **To check**, **Next step**. Skip a label that has nothing under it.
+- Put a quote from someone else in its own paragraph, in quotation marks, with who said it.
 - Link sources as [label](url) instead of pasting bare URLs into sentences.
-- A note of one or two sentences needs no structure. Never write a long note as one paragraph: any single line over ${MAX_NOTE_LINE_LENGTH} characters is rejected.
+- A note of one or two sentences needs no labels or bullets. Never write a long note as one paragraph: any single line over ${MAX_NOTE_LINE_LENGTH} characters is rejected. Raw IDs and raw field names are rejected too.
 
-Example:
-**Sourced lead for Staff Engineer.** Added by Sam on 3 Mar 2026 from the [conference speaker list](https://example.com/speakers).
+Example of a short note:
+Sam emailed her on 3 Mar 2026 to ask about start dates. No reply yet.
 
-**Background**
-- Staff engineer at Acme since 2022; led the payments rewrite
-- Based in London
+Example of a longer note:
+**Recommend moving her to the final interview.** Based on her work test and resume, reviewed on 3 Mar 2026.
 
-**To check**
-- Whether she is open to moving
-- UK work authorization`;
+**Evidence**
+- Work test: she found the pricing bug and explained the fix clearly
+- Led a team of 6 at Acme for two years
+
+**Concerns**
+- No experience managing a budget
+
+**Next step**
+- Sam to book the final interview`;
+
+/** Sent to the client when it connects, so the rules cover every tool, including ashby_call_api. */
+export const SERVER_INSTRUCTIONS = `Anything you write into Ashby (a note, a lead's sourcing note, feedback, or any text sent through ashby_call_api) is read later by people on the hiring team, skimming, without your conversation in front of them. Write it in plain English: short sentences, common words, no jargon, and no tool names, field names or IDs. Put the main point in the first sentence, then group the rest under short bold labels with one fact per bullet. The full rules are in the ashby_add_candidate_note description and in ashby_get_api_docs. Notes are written in Markdown and converted to Ashby rich text.`;
 
 const URL_PATTERN = /https?:\/\/[^\s<>"]+/g;
+const CODE_SPAN_PATTERN = /`[^`\n]+`/g;
+const UUID_PATTERN = /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/gi;
+// A raw field name used as a label, such as "personal_website:" or "other_urls:".
+const FIELD_LABEL_PATTERN = /(?<![\w@.])[a-z][a-z0-9]*(?:_[a-z0-9]+)+(?=:)/g;
 
 /**
- * Returns an instruction for the calling agent when the note is a wall of text,
- * or null when the note is fine. URLs do not count towards line length.
+ * Checks the parts of the writing guide a program can judge: layout, raw IDs
+ * and raw field names. Returns instructions for the calling agent when the
+ * note fails, or null when it passes. URLs and \`code\` spans are not checked.
+ * Word choice and tone are left to the guide in the tool description.
  */
 export function checkNoteReadability(note: string): string | null {
   const lines = note.replace(/\r\n?/g, "\n").split("\n");
+  const problems: string[] = [];
+
   const longest = Math.max(
     ...lines.map((line) => line.replace(URL_PATTERN, "").trim().length)
   );
-  if (longest <= MAX_NOTE_LINE_LENGTH) return null;
+  if (longest > MAX_NOTE_LINE_LENGTH) {
+    problems.push(
+      `It contains a ${longest}-character block of text with no line break. Keep line 1 to one sentence with the main point, move the rest under short bold labels (for example **Background**, **Evidence**, **To check**) with one fact per bullet, and split a long quote into paragraphs at its natural breaks.`
+    );
+  }
 
-  return `Note not saved: it contains a ${longest}-character block of text with no line break, which is hard to read in Ashby's feed. Nothing was created. Rewrite it and call the tool again:
-- Keep line 1 to one sentence: what this note is, where it came from, and the date.
-- Move the rest under short bold labels (for example **Background**, **Status**, **To check**) with one fact per bullet.
-- Split a long quote into paragraphs at its natural breaks.
-Keep every fact; change only the layout.`;
+  const prose = note.replace(URL_PATTERN, "").replace(CODE_SPAN_PATTERN, "");
+  if (UUID_PATTERN.test(prose)) {
+    problems.push(
+      "It contains a raw ID. A reader cannot use an ID: name the person, job or record in plain words, or link to it as [label](url)."
+    );
+  }
+  UUID_PATTERN.lastIndex = 0;
+
+  const fieldLabels = [...new Set(prose.match(FIELD_LABEL_PATTERN) ?? [])];
+  if (fieldLabels.length > 0) {
+    problems.push(
+      `It uses raw field names as labels (${fieldLabels.slice(0, 5).join(", ")}). Write them in plain words, for example "Personal website" instead of "personal_website".`
+    );
+  }
+
+  if (problems.length === 0) return null;
+
+  return `Note not saved: it would be hard to read in Ashby's feed. Nothing was created. Fix this and call the tool again:
+${problems.map((problem) => `- ${problem}`).join("\n")}
+Keep every fact; change only the wording and layout. If the reader really needs a literal value, put it in \`backticks\`.`;
+}
+
+/** Turns an HTML note into text lines so a hand-built HTML note gets the same checks. */
+export function htmlNoteToText(html: string): string {
+  return html
+    .replace(/<\s*br\s*\/?>|<\/\s*(?:p|li|div|ul|ol|pre|h[1-6])\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, "");
 }
 
 function escapeHtml(text: string): string {

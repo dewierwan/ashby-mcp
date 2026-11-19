@@ -1,8 +1,10 @@
 import { describe, it, expect } from "vitest";
 import {
   MAX_NOTE_LINE_LENGTH,
+  NOTE_WRITING_GUIDE,
   buildNotePayload,
   checkNoteReadability,
+  htmlNoteToText,
   noteMarkdownToHtml,
 } from "./note-format.js";
 
@@ -129,8 +131,52 @@ describe("checkNoteReadability", () => {
     expect(checkNoteReadability(note)).not.toBeNull();
   });
 
+  it("rejects raw IDs but allows them in links and code spans", () => {
+    expect(
+      checkNoteReadability("Duplicate of candidate da04a445-192b-4050-9cbf-63873c5d4e3e.")
+    ).toContain("raw ID");
+    expect(
+      checkNoteReadability(
+        "Duplicate of [Jane Doe](https://app.ashbyhq.com/candidates/da04a445-192b-4050-9cbf-63873c5d4e3e)."
+      )
+    ).toBeNull();
+    expect(checkNoteReadability("Ref `da04a445-192b-4050-9cbf-63873c5d4e3e`")).toBeNull();
+  });
+
+  it("rejects raw field names used as labels", () => {
+    const problem = checkNoteReadability("personal_website: https://example.com | other_urls: none");
+    expect(problem).toContain("personal_website");
+    expect(problem).toContain("other_urls");
+  });
+
+  it("allows underscores in handles, emails and ordinary labels", () => {
+    expect(checkNoteReadability("GitHub handle is jane_doe and email is jane_doe@example.com")).toBeNull();
+    expect(checkNoteReadability("Personal website: https://example.com")).toBeNull();
+  });
+
+  it("lists every problem in one message", () => {
+    const note = `${"A sentence about the candidate. ".repeat(30)}\nsource_list: alumni`;
+    const problem = checkNoteReadability(note) ?? "";
+    expect(problem).toContain("no line break");
+    expect(problem).toContain("source_list");
+  });
+
   it("does not count URLs towards line length", () => {
     const line = `Source: https://example.com/${"a".repeat(MAX_NOTE_LINE_LENGTH)}`;
     expect(checkNoteReadability(line)).toBeNull();
+  });
+});
+
+describe("NOTE_WRITING_GUIDE", () => {
+  it("passes its own checks", () => {
+    expect(checkNoteReadability(NOTE_WRITING_GUIDE)).toBeNull();
+  });
+});
+
+describe("htmlNoteToText", () => {
+  it("turns block tags into line breaks and drops the rest", () => {
+    expect(htmlNoteToText("<p><b>Hi</b> there</p><ul><li>One</li><li>Two</li></ul>")).toBe(
+      "Hi there\nOne\nTwo\n\n"
+    );
   });
 });

@@ -1,7 +1,41 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AshbyClient } from "../ashby-client.js";
-import { error, json } from "../tool-helpers.js";
+import { error, json, rejected } from "../tool-helpers.js";
+import {
+  NOTE_WRITING_GUIDE,
+  buildNotePayload,
+  checkNoteReadability,
+  htmlNoteToText,
+} from "../note-format.js";
+
+/**
+ * Gives notes sent through the escape hatch the same checks and formatting as
+ * ashby_add_candidate_note, so no route into the feed skips them.
+ * Returns the params to send, or a rejection message.
+ */
+function prepareNoteParams(
+  params: Record<string, unknown>
+): { params: Record<string, unknown> } | { problem: string } {
+  const note = params.note;
+
+  if (typeof note === "string") {
+    const problem = checkNoteReadability(note);
+    if (problem) return { problem };
+    return { params: { ...params, note: buildNotePayload(note) } };
+  }
+
+  // A caller that builds { type, value } itself keeps its own formatting but gets the same checks.
+  if (note && typeof note === "object") {
+    const { type, value } = note as { type?: unknown; value?: unknown };
+    if (typeof value === "string") {
+      const problem = checkNoteReadability(type === "text/html" ? htmlNoteToText(value) : value);
+      if (problem) return { problem };
+    }
+  }
+
+  return { params };
+}
 
 const API_DOCS = `# Ashby API quick reference
 
@@ -50,7 +84,7 @@ tool for those. The rest are reachable via \`ashby_call_api\`.
 - \`candidate.list\` — list all candidates. Params: \`limit\`, \`cursor\`, \`syncToken\`.
 - \`candidate.create\` ✓ (via \`ashby_add_lead\`) — create a candidate.
 - \`candidate.update\` — edit candidate fields (write).
-- \`candidate.createNote\` ✓ — add a note (write). Prefer \`ashby_add_candidate_note\`, which formats the note. \`note\` is a plain string (line breaks kept, Markdown shown literally) or \`{ type: "text/html", value }\`; Ashby renders p, br, b, i, u, code, pre, a, ul, ol, li and flattens headings and tables.
+- \`candidate.createNote\` ✓ — add a note (write). Prefer \`ashby_add_candidate_note\`. Through this tool a string \`note\` is treated as Markdown, checked and converted the same way; \`{ type: "text/html", value }\` is sent as written (Ashby renders p, br, b, i, u, code, pre, a, ul, ol, li and flattens headings and tables). See "Writing text into Ashby" below.
 - \`candidate.listNotes\` ✓ — list notes.
 - \`candidate.addTag\` ✓ — tag candidate (write).
 - \`candidate.removeTag\` — untag candidate (write).
@@ -112,6 +146,12 @@ may also require organization access after the scope is enabled.
 ### Surveys / referrals (if enabled)
 - \`survey.list\`, \`surveySubmission.list\`, \`referral.list\`.
 
+## Writing text into Ashby
+
+These rules apply to any text you write into Ashby through any endpoint.
+
+${NOTE_WRITING_GUIDE}
+
 ## Common gotchas
 
 - Many \`*.info\` endpoints take \`id\`, not a named id like \`jobId\` or
@@ -143,6 +183,11 @@ data. Use this when you need an endpoint that has no dedicated tool.
 
 Call ashby_get_api_docs first if you're not sure which endpoint to use.
 
+Text you write into Ashby through this tool must follow the plain-English
+writing rules in ashby_get_api_docs ("Writing text into Ashby"). A
+candidate.createNote note is checked and formatted the same way as in
+ashby_add_candidate_note.
+
 Handles auth, retries, and timeouts automatically. Returns the raw Ashby
 response including \`success\`, \`results\`, \`moreDataAvailable\`, \`nextCursor\`,
 and any error details — nothing is stripped.`,
@@ -162,8 +207,15 @@ and any error details — nothing is stripped.`,
     },
     { destructiveHint: true },
     async ({ endpoint, params }) => {
+      let requestParams = params ?? {};
+      if (endpoint === "candidate.createNote") {
+        const prepared = prepareNoteParams(requestParams);
+        if ("problem" in prepared) return rejected(prepared.problem);
+        requestParams = prepared.params;
+      }
+
       try {
-        const body = await client.rawRequest(endpoint, params ?? {});
+        const body = await client.rawRequest(endpoint, requestParams);
         const envelope = body as {
           success?: boolean;
           errorInfo?: { code?: string; message?: string };

@@ -199,7 +199,7 @@ Response: candidates[] (id, name, email, phone).`,
     "ashby_add_candidate_note",
     `Add a note to a candidate.
 
-Use this to record an assessment, a recommendation, or context the hiring team needs. The note will be visible to the hiring team in Ashby.
+Use this for anything the hiring team should see on the candidate: an assessment, a recommendation, a call or reference summary, a status update, or other context. The note will be visible to the hiring team in Ashby.
 
 ${NOTE_WRITING_GUIDE}
 
@@ -210,7 +210,7 @@ Response: note_id, confirmation message.`,
         .string()
         .min(1)
         .describe(
-          "The note, in Markdown. Summary sentence first, then bold labels with bullets. Visible to the hiring team."
+          "The note, in plain English and Markdown. Main point in the first sentence; if there is more, bold labels with bullets. Visible to the hiring team."
         ),
     },
     { destructiveHint: false, idempotentHint: false },
@@ -274,6 +274,8 @@ Response: confirmation message.`,
 Use this to source candidates (e.g. from LinkedIn) directly into Ashby. Creates the candidate,
 adds a Lead application on the specified job, and optionally attaches a note with sourcing context.
 
+For a lead, line 1 of the note says which role, who added them, from where and when. Useful labels are **Background**, **Why them** and **To check**.
+
 ${NOTE_WRITING_GUIDE}
 
 Response: candidate_id, application_id, note_id (if note provided), confirmation message.`,
@@ -287,7 +289,7 @@ Response: candidate_id, application_id, note_id (if note provided), confirmation
         .string()
         .optional()
         .describe(
-          "Sourcing note, in Markdown: who added the lead, from where and when, then bold labels with bullets. Visible to the hiring team."
+          "Sourcing note, in plain English and Markdown: which role, who added the lead, from where and when, then bold labels with bullets. Visible to the hiring team."
         ),
     },
     { destructiveHint: false, idempotentHint: false },

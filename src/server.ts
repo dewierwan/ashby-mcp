@@ -8,6 +8,7 @@ import { registerArchiveByFilterTools } from "./tools/archive-by-filter.js";
 import { registerInterviewTools } from "./tools/interviews.js";
 import { registerWorkflowTools } from "./tools/workflow.js";
 import { registerEscapeHatchTools } from "./tools/escape-hatch.js";
+import { SERVER_INSTRUCTIONS } from "./note-format.js";
 
 const require = createRequire(import.meta.url);
 const { version } = require("../package.json") as { version: string };
@@ -24,6 +25,8 @@ export function createServer(): McpServer {
         mimeType: "image/png",
       },
     ],
+  }, {
+    instructions: SERVER_INSTRUCTIONS,
   });
 
   const client = new AshbyClient();
