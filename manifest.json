@@ -41,7 +41,7 @@
     { "name": "ashby_get_candidate", "description": "Get a comprehensive candidate profile with all applications." },
     { "name": "ashby_get_candidate_notes", "description": "List all notes on a candidate." },
     { "name": "ashby_search_candidates", "description": "Search for candidates by name or email." },
-    { "name": "ashby_add_candidate_note", "description": "Add an evaluation note to a candidate, visible to the hiring team." },
+    { "name": "ashby_add_candidate_note", "description": "Add a formatted note (Markdown) to a candidate, visible to the hiring team." },
     { "name": "ashby_add_candidate_tag", "description": "Tag a candidate with a label." },
     { "name": "ashby_add_lead", "description": "Create a new candidate and add them as a lead on a job." },
     { "name": "ashby_get_resume", "description": "Download and extract text from a candidate's resume." },

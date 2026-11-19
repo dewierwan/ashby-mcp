@@ -157,12 +157,33 @@ Search candidates by name or email.
 
 #### `ashby_add_candidate_note`
 
-Add an evaluation note to a candidate. Visible to the hiring team.
+Add a note to a candidate. Visible to the hiring team.
 
 | Parameter | Type | Required | Description |
 |-----------|------|----------|-------------|
 | `candidate_id` | `string` | Yes | Candidate ID (UUID) |
-| `note` | `string` | Yes | Note content (plain text) |
+| `note` | `string` | Yes | Note content, in Markdown (see [Note formatting](#note-formatting)) |
+
+#### Note formatting
+
+`ashby_add_candidate_note` and `ashby_add_lead` take the note as Markdown and convert it to the rich text Ashby renders, so notes are easy to skim in a candidate's feed. The tool descriptions tell the agent how to lay a note out: one summary sentence, then short bold labels with one fact per bullet.
+
+```markdown
+**Sourced lead for Staff Engineer.** Added by Sam on 3 Mar 2026 from the [conference speaker list](https://example.com/speakers).
+
+**Background**
+- Staff engineer at Acme since 2022; led the payments rewrite
+- Based in London
+
+**To check**
+- Whether she is open to moving
+- UK work authorization
+```
+
+- Supported: `**bold**`, `*italic*`, `` `code` ``, `[label](url)`, bare URLs, `- ` bullets (indent two spaces to nest), `1. ` numbered lists, and blank lines between paragraphs.
+- A `#` heading becomes a bold line, because Ashby flattens heading tags sent through its API. Tables are not supported.
+- Plain text still works and keeps its line breaks.
+- A note with any single line over 600 characters is rejected before anything is created, with instructions to restructure it. This stops agents from saving a long note as one paragraph.
 
 #### `ashby_add_candidate_tag`
 

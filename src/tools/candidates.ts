@@ -2,9 +2,14 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 import type { AshbyClient } from "../ashby-client.js";
 import type { Application, Candidate, CandidateNote } from "../types.js";
+import {
+  NOTE_WRITING_GUIDE,
+  buildNotePayload,
+  checkNoteReadability,
+} from "../note-format.js";
 import { extractPdfText } from "../pdf.js";
 import { extractDocxText } from "../docx.js";
-import { error, json } from "../tool-helpers.js";
+import { error, json, rejected } from "../tool-helpers.js";
 import { logger } from "../logger.js";
 
 export function registerCandidateTools(server: McpServer, client: AshbyClient): void {
@@ -192,21 +197,31 @@ Response: candidates[] (id, name, email, phone).`,
 
   server.tool(
     "ashby_add_candidate_note",
-    `Add an evaluation note to a candidate.
+    `Add a note to a candidate.
 
-Use this to record your assessment or recommendations. The note will be visible to the hiring team in Ashby.
+Use this to record an assessment, a recommendation, or context the hiring team needs. The note will be visible to the hiring team in Ashby.
+
+${NOTE_WRITING_GUIDE}
 
 Response: note_id, confirmation message.`,
     {
       candidate_id: z.string().describe("The candidate ID (UUID) to add a note to."),
-      note: z.string().describe("The note content (plain text). Visible to the hiring team."),
+      note: z
+        .string()
+        .min(1)
+        .describe(
+          "The note, in Markdown. Summary sentence first, then bold labels with bullets. Visible to the hiring team."
+        ),
     },
     { destructiveHint: false, idempotentHint: false },
     async ({ candidate_id, note }) => {
+      const problem = checkNoteReadability(note);
+      if (problem) return rejected(problem);
+
       try {
         const result = await client.request<{ id: string }>(
           "candidate.createNote",
-          { candidateId: candidate_id, note }
+          { candidateId: candidate_id, note: buildNotePayload(note) }
         );
 
         return json(
@@ -259,6 +274,8 @@ Response: confirmation message.`,
 Use this to source candidates (e.g. from LinkedIn) directly into Ashby. Creates the candidate,
 adds a Lead application on the specified job, and optionally attaches a note with sourcing context.
 
+${NOTE_WRITING_GUIDE}
+
 Response: candidate_id, application_id, note_id (if note provided), confirmation message.`,
     {
       name: z.string().describe("Full name of the candidate."),
@@ -266,10 +283,19 @@ Response: candidate_id, application_id, note_id (if note provided), confirmation
       linkedin_url: z.string().optional().describe("LinkedIn profile URL."),
       email: z.string().optional().describe("Email address."),
       phone: z.string().optional().describe("Phone number."),
-      note: z.string().optional().describe("Note to attach (e.g. sourcing context). Visible to the hiring team."),
+      note: z
+        .string()
+        .optional()
+        .describe(
+          "Sourcing note, in Markdown: who added the lead, from where and when, then bold labels with bullets. Visible to the hiring team."
+        ),
     },
     { destructiveHint: false, idempotentHint: false },
     async ({ name, job_id, linkedin_url, email, phone, note }) => {
+      // Check the note before creating anything, so a rejected note leaves no half-made lead.
+      const problem = note ? checkNoteReadability(note) : null;
+      if (problem) return rejected(problem);
+
       try {
         // 1. Create candidate
         const candidateParams: Record<string, unknown> = { name };
@@ -293,7 +319,7 @@ Response: candidate_id, application_id, note_id (if note provided), confirmation
         if (note) {
           const noteResult = await client.request<{ id: string }>(
             "candidate.createNote",
-            { candidateId: candidate.id, note }
+            { candidateId: candidate.id, note: buildNotePayload(note) }
           );
           noteId = noteResult.id;
         }

@@ -1,7 +1,10 @@
 import { AshbyApiError } from "./ashby-client.js";
 import { enhanceError } from "./enhance-error.js";
 
-export type ToolResult = { content: { type: "text"; text: string }[] };
+export type ToolResult = {
+  content: { type: "text"; text: string }[];
+  isError?: boolean;
+};
 
 export function error(e: unknown): ToolResult {
   if (e instanceof AshbyApiError) {
@@ -19,4 +22,9 @@ export function json(summary: string, data: unknown): ToolResult {
       { type: "text" as const, text: JSON.stringify(data, null, 2) },
     ],
   };
+}
+
+/** A request refused before any API call, with instructions for the caller to fix it. */
+export function rejected(message: string): ToolResult {
+  return { content: [{ type: "text" as const, text: message }], isError: true };
 }

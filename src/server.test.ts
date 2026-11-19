@@ -432,8 +432,87 @@ describe("createServer", () => {
       expect(data.message).toContain("cand-1");
       expect(mockRequest).toHaveBeenCalledWith("candidate.createNote", {
         candidateId: "cand-1",
-        note: "Strong candidate",
+        note: { type: "text/html", value: "<p>Strong candidate</p>" },
       });
+    });
+
+    it("converts Markdown to the HTML Ashby renders", async () => {
+      mockRequest.mockResolvedValueOnce({ id: "note-1" });
+
+      const client = await setupClient();
+      await client.callTool({
+        name: "ashby_add_candidate_note",
+        arguments: {
+          candidate_id: "cand-1",
+          note: "**Advance to final.** Reviewed 3 Mar 2026.\n\n**Evidence**\n- Led the payments rewrite",
+        },
+      });
+
+      expect(mockRequest).toHaveBeenCalledWith("candidate.createNote", {
+        candidateId: "cand-1",
+        note: {
+          type: "text/html",
+          value:
+            "<p><b>Advance to final.</b> Reviewed 3 Mar 2026.</p>" +
+            "<p><b>Evidence</b></p><ul><li>Led the payments rewrite</li></ul>",
+        },
+      });
+    });
+
+    it("rejects a wall-of-text note without calling Ashby", async () => {
+      const client = await setupClient();
+      const result = (await client.callTool({
+        name: "ashby_add_candidate_note",
+        arguments: { candidate_id: "cand-1", note: "A sentence about the candidate. ".repeat(30) },
+      })) as { content: { text: string }[]; isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Note not saved");
+      expect(mockRequest).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("ashby_add_lead", () => {
+    it("creates the candidate, the lead application and an HTML note", async () => {
+      mockRequest
+        .mockResolvedValueOnce({ id: "cand-9" })
+        .mockResolvedValueOnce({ id: "app-9" })
+        .mockResolvedValueOnce({ id: "note-9" });
+
+      const client = await setupClient();
+      const result = await client.callTool({
+        name: "ashby_add_lead",
+        arguments: {
+          name: "Jane Doe",
+          job_id: "job-1",
+          linkedin_url: "https://www.linkedin.com/in/jane-doe",
+          note: "**Sourced lead.** Added by Sam on 3 Mar 2026.\n\n**To check**\n- Work authorization",
+        },
+      });
+      const data = getJson(result) as { candidate_id: string; application_id: string; note_id: string };
+
+      expect(data).toMatchObject({ candidate_id: "cand-9", application_id: "app-9", note_id: "note-9" });
+      expect(mockRequest).toHaveBeenNthCalledWith(3, "candidate.createNote", {
+        candidateId: "cand-9",
+        note: {
+          type: "text/html",
+          value:
+            "<p><b>Sourced lead.</b> Added by Sam on 3 Mar 2026.</p>" +
+            "<p><b>To check</b></p><ul><li>Work authorization</li></ul>",
+        },
+      });
+    });
+
+    it("rejects a wall-of-text note before creating the candidate", async () => {
+      const client = await setupClient();
+      const result = (await client.callTool({
+        name: "ashby_add_lead",
+        arguments: { name: "Jane Doe", job_id: "job-1", note: "A sentence about the lead. ".repeat(30) },
+      })) as { content: { text: string }[]; isError?: boolean };
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain("Nothing was created");
+      expect(mockRequest).not.toHaveBeenCalled();
     });
   });
 

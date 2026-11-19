@@ -50,7 +50,7 @@ tool for those. The rest are reachable via \`ashby_call_api\`.
 - \`candidate.list\` — list all candidates. Params: \`limit\`, \`cursor\`, \`syncToken\`.
 - \`candidate.create\` ✓ (via \`ashby_add_lead\`) — create a candidate.
 - \`candidate.update\` — edit candidate fields (write).
-- \`candidate.createNote\` ✓ — add a note (write).
+- \`candidate.createNote\` ✓ — add a note (write). Prefer \`ashby_add_candidate_note\`, which formats the note. \`note\` is a plain string (line breaks kept, Markdown shown literally) or \`{ type: "text/html", value }\`; Ashby renders p, br, b, i, u, code, pre, a, ul, ol, li and flattens headings and tables.
 - \`candidate.listNotes\` ✓ — list notes.
 - \`candidate.addTag\` ✓ — tag candidate (write).
 - \`candidate.removeTag\` — untag candidate (write).
